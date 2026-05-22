@@ -1,0 +1,267 @@
+#include "oled_ssd1306.h"
+#include <string.h>
+
+uint8_t OLED_Buffer[128 * 64 / 8];
+
+static const uint8_t Font5x7[][5] = {
+    {0x00,0x00,0x00,0x00,0x00}, // space
+    {0x00,0x00,0x5F,0x00,0x00}, // !
+    {0x00,0x07,0x00,0x07,0x00}, // "
+    {0x14,0x7F,0x14,0x7F,0x14}, // #
+    {0x24,0x2A,0x7F,0x2A,0x12}, // $
+    {0x23,0x13,0x08,0x64,0x62}, // %
+    {0x36,0x49,0x55,0x22,0x50}, // &
+    {0x00,0x05,0x03,0x00,0x00}, // '
+    {0x00,0x1C,0x22,0x41,0x00}, // (
+    {0x00,0x41,0x22,0x1C,0x00}, // )
+    {0x08,0x2A,0x1C,0x2A,0x08}, // *
+    {0x08,0x08,0x3E,0x08,0x08}, // +
+    {0x00,0x50,0x30,0x00,0x00}, // ,
+    {0x08,0x08,0x08,0x08,0x08}, // -
+    {0x00,0x60,0x60,0x00,0x00}, // .
+    {0x20,0x10,0x08,0x04,0x02}, // /
+    {0x3E,0x51,0x49,0x45,0x3E}, // 0
+    {0x00,0x42,0x7F,0x40,0x00}, // 1
+    {0x42,0x61,0x51,0x49,0x46}, // 2
+    {0x21,0x41,0x45,0x4B,0x31}, // 3
+    {0x18,0x14,0x12,0x7F,0x10}, // 4
+    {0x27,0x45,0x45,0x45,0x39}, // 5
+    {0x3C,0x4A,0x49,0x49,0x30}, // 6
+    {0x01,0x71,0x09,0x05,0x03}, // 7
+    {0x36,0x49,0x49,0x49,0x36}, // 8
+    {0x06,0x49,0x49,0x29,0x1E}, // 9
+    {0x00,0x36,0x36,0x00,0x00}, // :
+    {0x00,0x56,0x36,0x00,0x00}, // ;
+    {0x00,0x08,0x14,0x22,0x41}, // <
+    {0x14,0x14,0x14,0x14,0x14}, // =
+    {0x41,0x22,0x14,0x08,0x00}, // >
+    {0x02,0x01,0x51,0x09,0x06}, // ?
+    {0x32,0x49,0x79,0x41,0x3E}, // @
+    {0x7E,0x11,0x11,0x11,0x7E}, // A
+    {0x7F,0x49,0x49,0x49,0x36}, // B
+    {0x3E,0x41,0x41,0x41,0x22}, // C
+    {0x7F,0x41,0x41,0x22,0x1C}, // D
+    {0x7F,0x49,0x49,0x49,0x41}, // E
+    {0x7F,0x09,0x09,0x01,0x01}, // F
+    {0x3E,0x41,0x41,0x51,0x32}, // G
+    {0x7F,0x08,0x08,0x08,0x7F}, // H
+    {0x00,0x41,0x7F,0x41,0x00}, // I
+    {0x20,0x40,0x41,0x3F,0x01}, // J
+    {0x7F,0x08,0x14,0x22,0x41}, // K
+    {0x7F,0x40,0x40,0x40,0x40}, // L
+    {0x7F,0x02,0x04,0x02,0x7F}, // M
+    {0x7F,0x04,0x08,0x10,0x7F}, // N
+    {0x3E,0x41,0x41,0x41,0x3E}, // O
+    {0x7F,0x09,0x09,0x09,0x06}, // P
+    {0x3E,0x41,0x51,0x21,0x5E}, // Q
+    {0x7F,0x09,0x19,0x29,0x46}, // R
+    {0x46,0x49,0x49,0x49,0x31}, // S
+    {0x01,0x01,0x7F,0x01,0x01}, // T
+    {0x3F,0x40,0x40,0x40,0x3F}, // U
+    {0x1F,0x20,0x40,0x20,0x1F}, // V
+    {0x7F,0x20,0x18,0x20,0x7F}, // W
+    {0x63,0x14,0x08,0x14,0x63}, // X
+    {0x03,0x04,0x78,0x04,0x03}, // Y
+    {0x61,0x51,0x49,0x45,0x43}, // Z
+    {0x00,0x00,0x7F,0x41,0x41}, // [
+    {0x02,0x04,0x08,0x10,0x20}, // backslash
+    {0x41,0x41,0x7F,0x00,0x00}, // ]
+    {0x04,0x02,0x01,0x02,0x04}, // ^
+    {0x40,0x40,0x40,0x40,0x40}, // _
+    {0x00,0x01,0x02,0x04,0x00}, // `
+    {0x20,0x54,0x54,0x54,0x78}, // a
+    {0x7F,0x48,0x44,0x44,0x38}, // b
+    {0x38,0x44,0x44,0x44,0x20}, // c
+    {0x38,0x44,0x44,0x48,0x7F}, // d
+    {0x38,0x54,0x54,0x54,0x18}, // e
+    {0x08,0x7E,0x09,0x01,0x02}, // f
+    {0x08,0x14,0x54,0x54,0x3C}, // g
+    {0x7F,0x08,0x04,0x04,0x78}, // h
+    {0x00,0x44,0x7D,0x40,0x00}, // i
+    {0x20,0x40,0x44,0x3D,0x00}, // j
+    {0x00,0x7F,0x10,0x28,0x44}, // k
+    {0x00,0x41,0x7F,0x40,0x00}, // l
+    {0x7C,0x04,0x18,0x04,0x78}, // m
+    {0x7C,0x08,0x04,0x04,0x78}, // n
+    {0x38,0x44,0x44,0x44,0x38}, // o
+    {0x7C,0x14,0x14,0x14,0x08}, // p
+    {0x08,0x14,0x14,0x18,0x7C}, // q
+    {0x7C,0x08,0x04,0x04,0x08}, // r
+    {0x48,0x54,0x54,0x54,0x20}, // s
+    {0x04,0x3F,0x44,0x40,0x20}, // t
+    {0x3C,0x40,0x40,0x20,0x7C}, // u
+    {0x1C,0x20,0x40,0x20,0x1C}, // v
+    {0x3C,0x40,0x30,0x40,0x3C}, // w
+    {0x44,0x28,0x10,0x28,0x44}, // x
+    {0x0C,0x50,0x50,0x50,0x3C}, // y
+    {0x44,0x64,0x54,0x4C,0x44}, // z
+};
+
+#define I2C_TIMEOUT 100000
+
+static uint8_t I2C_WaitEvent(I2C_TypeDef *I2Cx, uint32_t event) {
+    uint32_t timeout = I2C_TIMEOUT;
+    while (!I2C_CheckEvent(I2Cx, event)) {
+        if (--timeout == 0) return 0;
+    }
+    return 1;
+}
+
+static void I2C_Write(uint8_t addr, uint8_t data) {
+    uint32_t timeout = I2C_TIMEOUT;
+    while (I2C_GetFlagStatus(OLED_I2C, I2C_FLAG_BUSY))
+        if (--timeout == 0) { I2C_GenerateSTOP(OLED_I2C, ENABLE); return; }
+    I2C_GenerateSTART(OLED_I2C, ENABLE);
+    if (!I2C_WaitEvent(OLED_I2C, I2C_EVENT_MASTER_MODE_SELECT)) { I2C_GenerateSTOP(OLED_I2C, ENABLE); return; }
+    I2C_Send7bitAddress(OLED_I2C, OLED_ADDR << 1, I2C_Direction_Transmitter);
+    if (!I2C_WaitEvent(OLED_I2C, I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED)) { I2C_GenerateSTOP(OLED_I2C, ENABLE); return; }
+    I2C_SendData(OLED_I2C, addr);
+    if (!I2C_WaitEvent(OLED_I2C, I2C_EVENT_MASTER_BYTE_TRANSMITTED)) { I2C_GenerateSTOP(OLED_I2C, ENABLE); return; }
+    I2C_SendData(OLED_I2C, data);
+    if (!I2C_WaitEvent(OLED_I2C, I2C_EVENT_MASTER_BYTE_TRANSMITTED)) { I2C_GenerateSTOP(OLED_I2C, ENABLE); return; }
+    I2C_GenerateSTOP(OLED_I2C, ENABLE);
+}
+
+void OLED_WriteCmd(uint8_t cmd) { I2C_Write(OLED_CMD, cmd); }
+void OLED_WriteData(uint8_t data) { I2C_Write(OLED_DATA, data); }
+
+static void OLED_WriteBuffer(uint8_t ctrl, const uint8_t *data, uint16_t len) {
+    uint32_t timeout = I2C_TIMEOUT;
+    while (I2C_GetFlagStatus(OLED_I2C, I2C_FLAG_BUSY))
+        if (--timeout == 0) { I2C_GenerateSTOP(OLED_I2C, ENABLE); return; }
+    I2C_GenerateSTART(OLED_I2C, ENABLE);
+    if (!I2C_WaitEvent(OLED_I2C, I2C_EVENT_MASTER_MODE_SELECT)) { I2C_GenerateSTOP(OLED_I2C, ENABLE); return; }
+    I2C_Send7bitAddress(OLED_I2C, OLED_ADDR << 1, I2C_Direction_Transmitter);
+    if (!I2C_WaitEvent(OLED_I2C, I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED)) { I2C_GenerateSTOP(OLED_I2C, ENABLE); return; }
+    I2C_SendData(OLED_I2C, ctrl);
+    if (!I2C_WaitEvent(OLED_I2C, I2C_EVENT_MASTER_BYTE_TRANSMITTED)) { I2C_GenerateSTOP(OLED_I2C, ENABLE); return; }
+    for (uint16_t i = 0; i < len; i++) {
+        I2C_SendData(OLED_I2C, data[i]);
+        if (!I2C_WaitEvent(OLED_I2C, I2C_EVENT_MASTER_BYTE_TRANSMITTED)) { I2C_GenerateSTOP(OLED_I2C, ENABLE); return; }
+    }
+    I2C_GenerateSTOP(OLED_I2C, ENABLE);
+}
+
+void OLED_Init(void) {
+    RCC_APB1PeriphClockCmd(OLED_I2C_CLK, ENABLE);
+    RCC_APB2PeriphClockCmd(OLED_GPIO_CLK, ENABLE);
+
+    GPIO_InitTypeDef gpio;
+    gpio.GPIO_Pin = OLED_SCL_PIN | OLED_SDA_PIN;
+    gpio.GPIO_Mode = GPIO_Mode_AF_OD;
+    gpio.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_Init(OLED_GPIO, &gpio);
+
+    I2C_InitTypeDef i2c;
+    i2c.I2C_Mode = I2C_Mode_I2C;
+    i2c.I2C_DutyCycle = I2C_DutyCycle_2;
+    i2c.I2C_OwnAddress1 = 0x00;
+    i2c.I2C_Ack = I2C_Ack_Enable;
+    i2c.I2C_AcknowledgedAddress = I2C_AcknowledgedAddress_7bit;
+    i2c.I2C_ClockSpeed = 400000;
+    I2C_Init(OLED_I2C, &i2c);
+    I2C_Cmd(OLED_I2C, ENABLE);
+
+    OLED_WriteCmd(0xAE);
+    OLED_WriteCmd(0xD5); OLED_WriteCmd(0x80);
+    OLED_WriteCmd(0xA8); OLED_WriteCmd(0x3F);
+    OLED_WriteCmd(0xD3); OLED_WriteCmd(0x00);
+    OLED_WriteCmd(0x40);
+    OLED_WriteCmd(0x8D); OLED_WriteCmd(0x14);
+    OLED_WriteCmd(0x20); OLED_WriteCmd(0x00);
+    OLED_WriteCmd(0xA1);
+    OLED_WriteCmd(0xC8);
+    OLED_WriteCmd(0xDA); OLED_WriteCmd(0x12);
+    OLED_WriteCmd(0x81); OLED_WriteCmd(0xCF);
+    OLED_WriteCmd(0xD9); OLED_WriteCmd(0xF1);
+    OLED_WriteCmd(0xDB); OLED_WriteCmd(0x40);
+    OLED_WriteCmd(0xA4);
+    OLED_WriteCmd(0xA6);
+    OLED_WriteCmd(0xAF);
+    OLED_Clear();
+    OLED_Refresh();
+}
+
+void OLED_Clear(void) {
+    memset(OLED_Buffer, 0, sizeof(OLED_Buffer));
+}
+
+void OLED_Refresh(void) {
+    for (uint8_t page = 0; page < 8; page++) {
+        OLED_WriteCmd(0xB0 + page);
+        OLED_WriteCmd(0x00);
+        OLED_WriteCmd(0x10);
+        OLED_WriteBuffer(OLED_DATA, &OLED_Buffer[page * 128], 128);
+    }
+}
+
+void OLED_SetPixel(uint8_t x, uint8_t y, uint8_t color) {
+    if (x >= 128 || y >= 64) return;
+    if (color)
+        OLED_Buffer[x + (y / 8) * 128] |= (1 << (y % 8));
+    else
+        OLED_Buffer[x + (y / 8) * 128] &= ~(1 << (y % 8));
+}
+
+void OLED_DrawChar(uint8_t x, uint8_t y, char c) {
+    if (c < ' ' || c > 'z') c = ' ';
+    for (uint8_t i = 0; i < 5; i++) {
+        uint8_t line = Font5x7[c - ' '][i];
+        for (uint8_t j = 0; j < 7; j++) {
+            if (line & (1 << j))
+                OLED_SetPixel(x + i, y + j, 1);
+        }
+    }
+    // Clear 6th column for spacing
+    for (uint8_t j = 0; j < 7; j++)
+        OLED_SetPixel(x + 5, y + j, 0);
+}
+
+void OLED_DrawString(uint8_t x, uint8_t y, const char *str) {
+    while (*str) {
+        if (x + 6 > 128) break;
+        OLED_DrawChar(x, y, *str);
+        x += 6;
+        str++;
+    }
+}
+
+void OLED_DrawHLine(uint8_t x1, uint8_t x2, uint8_t y) {
+    for (uint8_t x = x1; x <= x2; x++)
+        OLED_SetPixel(x, y, 1);
+}
+
+void OLED_DrawVLine(uint8_t x, uint8_t y1, uint8_t y2) {
+    for (uint8_t y = y1; y <= y2; y++)
+        OLED_SetPixel(x, y, 1);
+}
+
+void OLED_DrawRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
+    OLED_DrawHLine(x, x + w - 1, y);
+    OLED_DrawHLine(x, x + w - 1, y + h - 1);
+    OLED_DrawVLine(x, y, y + h - 1);
+    OLED_DrawVLine(x + w - 1, y, y + h - 1);
+}
+
+void OLED_FillRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
+    for (uint8_t yy = y; yy < y + h; yy++)
+        for (uint8_t xx = x; xx < x + w; xx++)
+            OLED_SetPixel(xx, yy, 1);
+}
+
+void OLED_DrawCircle(uint8_t cx, uint8_t cy, uint8_t filled) {
+    // 7x7 circle (radius 3)
+    int8_t r = 3;
+    for (int8_t dy = -r; dy <= r; dy++) {
+        for (int8_t dx = -r; dx <= r; dx++) {
+            int16_t d2 = dx * dx + dy * dy;
+            if (filled) {
+                if (d2 <= r * r)
+                    OLED_SetPixel(cx + dx, cy + dy, 1);
+            } else {
+                if ((r - 1) * (r - 1) < d2 && d2 <= r * r)
+                    OLED_SetPixel(cx + dx, cy + dy, 1);
+            }
+        }
+    }
+}
