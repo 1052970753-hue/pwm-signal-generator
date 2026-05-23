@@ -58,7 +58,7 @@ typedef enum {
  *    输出电压 (0.0~5.0V) → 使能开关
  */
 typedef enum {
-    VSP_ITEM_VOLTAGE = 0,   // VSP 输出电压 (0.0~5.0V, 0.1V步进, 存储值×10)
+    VSP_ITEM_VOLTAGE = 0,   // VSP 输出电压 (0.0~5.0V, 0.01V步进, 存储值×100)
     VSP_ITEM_ENABLE,        // VSP 使能开关 (0=关, 1=开)
     NUM_VSP_ITEMS           // VSP 参数项总数
 } VspCursorItem;
@@ -171,7 +171,7 @@ typedef struct {
 } SystemParams;
 
 /* ══════════════════════════════════════════════
- *  状态上报数据 (StatusData, 25字节)
+ *  状态上报数据 (StatusData, 29字节)
  * ══════════════════════════════════════════════
  *  MCU → PC 周期性上报 (500ms) 或响应 CMD_READ_STATUS 查询。
  *  字段偏移量必须与模拟器 Python 端 read_status_data() 严格对齐。
@@ -267,13 +267,13 @@ typedef enum {
     CMD_WRITE_PWM     = 0x20,   // 写PWM参数 (PC→MCU, PwmWriteReq 7B)
     CMD_WRITE_FG_DIV  = 0x30,   // 写FG分频 (PC→MCU, FgDivReq 1B)
     CMD_KEY_EVENT     = 0x41,   // 按键事件 (PC→MCU, KeyEventReq 1B)
-    CMD_SET_TEST      = 0x42,   // 设置测试参数 (PC→MCU, TestConfig 12B)
+    CMD_SET_TEST      = 0x42,   // 设置测试参数 (PC→MCU, TestConfig 13B)
     CMD_START_TEST    = 0x43,   // 启动测试 (PC→MCU, 无数据)
     CMD_STOP_TEST     = 0x44,   // 停止测试 (PC→MCU, 无数据)
     CMD_EXPORT_DATA   = 0x50,   // 请求导出CSV (PC→MCU, 无数据)
     CMD_EXPORT_CHUNK  = 0x51,   // CSV数据块 (MCU→PC, ≤64B)
     CMD_EXPORT_DONE   = 0x52,   // 导出完成 (MCU→PC, 无数据)
-    CMD_WRITE_VSP     = 0x60    // 写VSP参数 (PC→MCU, VspWriteReq 2B)
+    CMD_WRITE_VSP     = 0x60    // 写VSP参数 (PC→MCU, VspWriteReq 3B)
 } ProtocolCmd;
 
 // ── 帧头标识 ──

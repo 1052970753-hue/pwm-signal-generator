@@ -383,8 +383,8 @@ void Protocol_ProcessExport(void) {
 }
 
 /* ── CMD_WRITE_VSP: PC 写入 VSP 参数 ──
- * 数据: VspWriteReq 结构体 {voltage_x10, enabled}
- * voltage_x10 范围: 0~50 (0.0~5.0V)
+ * 数据: VspWriteReq 结构体 {voltage_x100, enabled}
+ * voltage_x100 范围: 0~500 (0.00~5.00V)
  * 直接调用 DAC 输出并更新 g_params
  */
 static void handle_write_vsp(void) {
