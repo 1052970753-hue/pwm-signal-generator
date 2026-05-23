@@ -131,11 +131,11 @@ BNC (5V) ──→ 10kΩ ──┬──→ PA0 (2.5V, 安全)
 ### 目录结构
 
 ```
-ALIENTEK MINISTM32 实验9 输入捕获实验 -20250515/
+STM32固件/
 ├── USER/
 │   ├── main.c              # 主循环 + 测试状态机
 │   ├── stm32f10x_it.c      # 中断服务 (SysTick)
-│   └── ICAPTURE.uvprojx    # Keil 工程文件
+│   └── PWM信号发生器.uvprojx # Keil 工程文件
 ├── HARDWARE/
 │   ├── APP/                # 应用层 (本次开发)
 │   │   ├── menu_defs.h     # 类型定义 (枚举/结构体)
@@ -165,7 +165,7 @@ ALIENTEK MINISTM32 实验9 输入捕获实验 -20250515/
 
 ### 编译
 
-Keil MDK-ARM 打开 `USER/ICAPTURE.uvprojx`，编译即可。
+Keil MDK-ARM 打开 `USER/PWM信号发生器.uvprojx`，编译即可。
 
 ---
 
