@@ -46,6 +46,9 @@ int main(void) {
     uint32_t last_status = 0;
 
     while (1) {
+        // Handle incoming UART frames
+        Protocol_Process();
+
         InputEvent ev = Encoder_Poll();
         if (ev != EVENT_NONE) {
             Menu_Process(ev);

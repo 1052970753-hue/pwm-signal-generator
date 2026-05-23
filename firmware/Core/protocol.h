@@ -6,6 +6,6 @@
 
 void Protocol_Init(void);
 void Protocol_SendStatus(StatusData *status);
-void Protocol_Process(void);
+void Protocol_Process(void);  // Call in main loop to handle incoming frames
 
 #endif
