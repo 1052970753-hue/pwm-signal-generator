@@ -170,21 +170,8 @@ static void handle_read_status(void) {
     send_frame(CMD_READ_STATUS, (const uint8_t *)&sd, sizeof(StatusData));
 }
 
-// ── Dispatch received frame ──
+// ── Dispatch received frame (CRC already verified by parser) ──
 static void dispatch_frame(void) {
-    // Verify CRC: frame bytes are [HEADER, CMD, LEN, DATA..., CRC]
-    // We reconstruct into tx_buf for CRC check
-    tx_buf[0] = FRAME_HEADER_PC2MCU;
-    tx_buf[1] = frame_cmd;
-    tx_buf[2] = frame_len;
-    if (frame_len > 0)
-        memcpy(tx_buf + 3, frame_data, frame_len);
-    uint8_t expected_crc = crc8(tx_buf, 3 + frame_len);
-
-    // CRC was already consumed as the last byte in the parser
-    // We stored it separately — but actually we need to retrieve it
-    // The parser already verified it (see below), so just dispatch
-
     switch (frame_cmd) {
         case CMD_READ_STATUS:  handle_read_status();  break;
         case CMD_WRITE_PWM:    handle_write_pwm();    break;
