@@ -1107,7 +1107,7 @@ class MainWindow(QMainWindow):
             "【操作】旋转旋钮调参  |  点击OK启停通道  |  长按OK选择项目  |  双击OK切换模式\n"
             "【模式】PWM-FG:双通道输出  FG:频率计  CH1/CH2:单通道调节  TEST:自动测试循环\n"
             "【串口】选择COM口 → 点击「连接」，参数自动同步，测试数据可导出CSV\n"
-            "【键盘】↑↓=调参  Enter/空格=启停  Tab=选择  M=切模式  1~5=跳转模式  Esc=退出"
+            "【键盘】↑↓=调参  Enter/空格=启停  L=选择  M=切模式  1~5=跳转模式  Esc=退出"
         )
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color:#606878; font-size:10px; font-weight:normal; line-height:1.4;")
@@ -1160,7 +1160,7 @@ class MainWindow(QMainWindow):
             Qt.Key.Key_Enter:    EVENT_CLICK,
             Qt.Key.Key_Space:    EVENT_CLICK,
             Qt.Key.Key_Escape:   EVENT_CLICK,
-            Qt.Key.Key_Tab:      EVENT_LONG_PRESS,
+            Qt.Key.Key_L:        EVENT_LONG_PRESS,
             Qt.Key.Key_M:        EVENT_DOUBLE_CLICK,
         }
         if key in mapping:
