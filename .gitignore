@@ -19,11 +19,7 @@ DebugConfig/
 RTE/
 Listings/
 Objects/
-OBJ/*.o
-OBJ/*.d
-OBJ/*.axf
-OBJ/*.hex
-OBJ/*.sct
+OBJ/
 
 # IDE files
 *.cbp
