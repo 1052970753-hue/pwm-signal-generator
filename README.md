@@ -248,7 +248,7 @@ pip install PyQt6 pyserial
 python simulator/run_simulator.py
 ```
 
-也可直接运行项目根目录的 `PWM信号发生器.exe` (PyInstaller 打包)。
+也可直接运行项目根目录的 `PWM_Simulator.exe` (PyInstaller 打包)。
 
 ### 操作方式
 
@@ -352,7 +352,7 @@ pip install PyQt6 pyserial
 python simulator/run_simulator.py
 ```
 
-或直接双击 `PWM信号发生器.exe`。
+或直接双击 `PWM_Simulator.exe`。
 
 ### 连接实物
 
@@ -375,7 +375,7 @@ PWM信号发生器/
 ├── common/
 │   └── protocol_defs.h     共享协议定义 (固件 + 模拟器)
 ├── hardware/               硬件文档 (原理图 / BOM / 扩展板 / 架构)
-├── PWM信号发生器.exe        模拟器可执行文件
+├── PWM_Simulator.exe        模拟器可执行文件
 └── README.md
 ```
 
