@@ -24,7 +24,8 @@ typedef enum {
     CMD_STOP_TEST     = 0x44,  // Stop test
     CMD_EXPORT_DATA   = 0x50,  // Request test data export
     CMD_EXPORT_CHUNK  = 0x51,  // MCU sends CSV data chunk
-    CMD_EXPORT_DONE   = 0x52   // MCU signals export complete
+    CMD_EXPORT_DONE   = 0x52,  // MCU signals export complete
+    CMD_WRITE_VSP     = 0x60   // Write VSP parameters
 } ProtocolCmd;
 
 typedef struct {
@@ -41,7 +42,10 @@ typedef struct {
     uint8_t  test_state;   // TestState (0=idle,1=running,2=done)
     uint16_t test_cycle;   // current cycle number
     uint16_t test_total;   // total cycles configured
-} StatusData;  // 25 bytes
+    uint8_t  vsp_voltage_x10;  // VSP voltage *10 (0~50 = 0.0~5.0V)
+    uint8_t  vsp_enabled;      // VSP enable (0=off, 1=on)
+    uint8_t  test_on_method;   // Test ON method (0=PWM, 1=relay, 2=both)
+} StatusData;  // 28 bytes
 
 typedef struct {
     uint8_t  channel;
@@ -65,7 +69,13 @@ typedef struct {
     uint16_t cycles;        // 1-999
     uint16_t on_time_sec;   // 1-60
     uint16_t off_time_sec;  // 1-60
-} TestConfig;  // 12 bytes
+    uint8_t  on_method;     // 0=PWM, 1=relay, 2=both
+} TestConfig;  // 13 bytes
+
+typedef struct {
+    uint8_t voltage_x10;    // VSP voltage *10 (0~50 = 0.0~5.0V)
+    uint8_t enabled;        // VSP enable (0=off, 1=on)
+} VspWriteReq;
 
 // System parameters (runtime config)
 typedef struct {
@@ -77,6 +87,9 @@ typedef struct {
     uint8_t  ch2_enabled;
     uint8_t  fg_div;
     uint16_t fg_pulses_per_rev;
+    uint8_t  vsp_voltage_x10;
+    uint8_t  vsp_enabled;
+    uint8_t  test_on_method;
 } SystemParams;
 
 uint8_t crc8(const uint8_t *data, uint8_t len);

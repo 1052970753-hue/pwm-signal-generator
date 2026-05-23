@@ -109,6 +109,9 @@ void Menu_Init(void) {
     g_params.ch2_enabled = 0;       // CH2 默认关闭
     g_params.fg_div = 2;            // FG 默认 2 分频
     g_params.fg_pulses_per_rev = 2; // 每转脉冲数 (备用)
+    g_params.vsp_voltage_x10 = 0;   // VSP 默认 0V
+    g_params.vsp_enabled = 0;       // VSP 默认关闭
+    g_params.test_on_method = 0;    // 测试默认 PWM 开关
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -286,6 +289,18 @@ static void set_test_cursor_value(s32 delta) {
                 test_off_sec = (test_off_sec > d) ? test_off_sec - d : 1;  // 最小为 1 秒
             }
             break;
+        case TEST_ITEM_ON_METHOD:
+            // ON 方式切换: 0=PWM → 1=继电器 → 2=两者 → 0=PWM
+            if (delta > 0) {
+                g_params.test_on_method++;
+                if (g_params.test_on_method > 2) g_params.test_on_method = 0;
+            } else {
+                if (g_params.test_on_method == 0)
+                    g_params.test_on_method = 2;
+                else
+                    g_params.test_on_method--;
+            }
+            break;
         default: break;  // TEST_ITEM_START 无旋钮操作
     }
 }
@@ -312,6 +327,8 @@ u16 Menu_GetTestOnSec(void) { return test_on_sec; }
 u16 Menu_GetTestOffSec(void) { return test_off_sec; }
 // 获取已记录的测试数据条数
 u16 Menu_GetTestRecordCount(void) { return test_record_count; }
+// 获取测试 ON 方式 (0=PWM, 1=继电器, 2=两者)
+u8  Menu_GetTestOnMethod(void) { return g_params.test_on_method; }
 
 /* ── PC 端设置测试参数 (含边界检查) ──
  * 由 protocol.c 的 CMD_SET_TEST 调用
@@ -324,6 +341,7 @@ void Menu_SetTestConfig(TestConfig *cfg) {
     test_cycles = (cfg->cycles >= 1) ? cfg->cycles : 1;                                    // 循环至少 1 次
     test_on_sec = (cfg->on_time_sec >= 1) ? cfg->on_time_sec : 1;                         // ON 至少 1 秒
     test_off_sec = (cfg->off_time_sec >= 1) ? cfg->off_time_sec : 1;                      // OFF 至少 1 秒
+    g_params.test_on_method = (cfg->on_method <= 2) ? cfg->on_method : 0;                 // ON 方式 0~2
 }
 
 /* ── 启动测试 ──
@@ -492,9 +510,11 @@ void Menu_Process(InputEvent ev) {
     if (g_menu.selected) {
         u8 max_items;
         if (g_menu.mode == MODE_TEST)
-            max_items = NUM_TEST_ITEMS;                    // 测试模式: 7 个参数项
+            max_items = NUM_TEST_ITEMS;                    // 测试模式: 8 个参数项
         else if (g_menu.mode == MODE_PWM_FG)
             max_items = NUM_ITEMS;                         // PWM-FG 模式: 5 个参数项
+        else if (g_menu.mode == MODE_VSP)
+            max_items = NUM_VSP_ITEMS;                     // VSP 模式: 2 个参数项
         else
             max_items = 3;                                 // CH1/CH2 模式: 3 个参数项
 
@@ -643,6 +663,36 @@ void Menu_Process(InputEvent ev) {
                     break;
                 case EVENT_LONG_PRESS:
                     g_menu.selected = 1;                               // 长按进入选择模式
+                    break;
+                default: break;
+            }
+            break;
+
+        /* ── MODE_VSP: VSP 模拟电压输出 ──
+         * 2 个参数项: 输出电压 (0~50 = 0.0~5.0V) / 使能开关
+         * 旋钮: 调节电压值 (0.1V 步进, 存储值×10)
+         * 短按: 切换 VSP 使能
+         * 长按: 进入选择模式
+         */
+        case MODE_VSP:
+            switch (ev) {
+                case EVENT_CW:
+                    if (g_menu.cursor == VSP_ITEM_VOLTAGE) {
+                        if (g_params.vsp_voltage_x10 < 50)
+                            g_params.vsp_voltage_x10++;     // 电压 +0.1V
+                    }
+                    break;
+                case EVENT_CCW:
+                    if (g_menu.cursor == VSP_ITEM_VOLTAGE) {
+                        if (g_params.vsp_voltage_x10 > 0)
+                            g_params.vsp_voltage_x10--;     // 电压 -0.1V
+                    }
+                    break;
+                case EVENT_CLICK:
+                    g_params.vsp_enabled = !g_params.vsp_enabled;  // 短按切换使能
+                    break;
+                case EVENT_LONG_PRESS:
+                    g_menu.selected = 1;                           // 长按进入选择模式
                     break;
                 default: break;
             }

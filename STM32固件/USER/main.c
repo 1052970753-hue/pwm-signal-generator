@@ -28,6 +28,8 @@
  *                                          └────────┘             └────────┘
  */
 #include "stm32f10x.h"
+#include "stm32f10x_gpio.h"
+#include "stm32f10x_rcc.h"
 #include "delay.h"
 #include "usart.h"
 #include "oled.h"
@@ -38,6 +40,7 @@
 #include "../HARDWARE/APP/ui_render.h"
 #include "../HARDWARE/APP/menu.h"
 #include "../HARDWARE/APP/protocol.h"
+#include "../HARDWARE/APP/dac_output.h"
 
 // ══════════════════════════════════════════════════════════════════════
 //  全局变量
@@ -93,10 +96,19 @@ static void test_start_cycle(void) {
     test_rpm_sum = 0;               // 重置累加和
     test_rpm_count = 0;             // 重置采样计数
 
-    // 获取测试通道号并设置 PWM 频率和占空比, 然后开启输出
+    // 根据 ON 方式决定启停动作
+    u8 method = Menu_GetTestOnMethod();
     u8 ch = Menu_GetTestChannel();
-    PWM_SetChannel(ch, Menu_GetTestFreq(), Menu_GetTestDuty());
-    PWM_EnableChannel(ch, 1);
+
+    if (method == 0 || method == 2) {
+        // PWM 方式: 设置并开启 PWM 输出
+        PWM_SetChannel(ch, Menu_GetTestFreq(), Menu_GetTestDuty());
+        PWM_EnableChannel(ch, 1);
+    }
+    if (method == 1 || method == 2) {
+        // 继电器方式: 吸合继电器 (PB5 高电平)
+        GPIO_SetBits(GPIOB, GPIO_Pin_5);
+    }
 }
 
 // ── 测试状态机主处理函数 (每次主循环都调用) ──
@@ -120,6 +132,7 @@ static void test_handle_tick(void) {
             test_phase = 0;
             u8 ch = Menu_GetTestChannel();
             PWM_EnableChannel(ch, 0);   // 确保 PWM 输出关闭
+            GPIO_ResetBits(GPIOB, GPIO_Pin_5);  // 确保继电器断开
         }
         return;
     }
@@ -173,9 +186,15 @@ static void test_handle_tick(void) {
             test_current_cycle++;
             Menu_AddTestRecord(test_current_cycle, target, test_rpm_max, rpm_avg, error, startup_ok);
 
-            // 关闭 PWM, 切回 OFF 阶段 (等待冷却)
+            // 关闭输出, 切回 OFF 阶段 (等待冷却)
             u8 ch = Menu_GetTestChannel();
-            PWM_EnableChannel(ch, 0);
+            u8 method = Menu_GetTestOnMethod();
+            if (method == 0 || method == 2) {
+                PWM_EnableChannel(ch, 0);                  // 关闭 PWM
+            }
+            if (method == 1 || method == 2) {
+                GPIO_ResetBits(GPIOB, GPIO_Pin_5);         // 断开继电器
+            }
             test_phase = 0;             // 回到 OFF
             test_phase_start = sys_tick; // 记录 OFF 起始时刻
         }
@@ -220,6 +239,13 @@ int main(void) {
     Encoder_Init();             // 编码器: PA6(A)/PA7(B) TIM3 编码器模式 + PB8(OK) GPIO
     PWM_Init();                 // PWM: PA8(TIM1_CH1) + PB6(TIM4_CH1), 默认 1kHz/0%
     FG_Init();                  // 频率计: PA0(TIM2_CH1) 输入捕获, 1us 分辨率
+    DAC_Output_Init();          // DAC: PA4 通道1, 12位精度
+
+    // 继电器控制引脚 PB5 初始化 (推挽输出, 默认低电平=继电器断开)
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
+    { GPIO_InitTypeDef gpio; gpio.GPIO_Pin = GPIO_Pin_5; gpio.GPIO_Mode = GPIO_Mode_Out_PP; gpio.GPIO_Speed = GPIO_Speed_2MHz; GPIO_Init(GPIOB, &gpio); }
+    GPIO_ResetBits(GPIOB, GPIO_Pin_5);  // 初始断开继电器
+
     Protocol_Init();            // 串口协议: 帧解析状态机初始化
     Menu_Init();                // 菜单: 恢复默认参数, 初始化状态
 
@@ -256,6 +282,12 @@ int main(void) {
             if (g_menu.dirty) {
                 // 参数已修改 → 同步更新 PWM 输出
                 PWM_UpdateFromParams(&g_params);
+                // 同步更新 VSP DAC 输出
+                if (g_params.vsp_enabled) {
+                    DAC_Output_SetVoltage(g_params.vsp_voltage_x10);
+                } else {
+                    DAC_Output_Off();
+                }
                 g_menu.dirty = 0;
             }
         }
@@ -316,6 +348,9 @@ int main(void) {
             sd.test_state    = now_running ? TEST_RUNNING : TEST_IDLE;
             sd.test_cycle    = test_current_cycle;       // 已完成循环数
             sd.test_total    = Menu_GetTestCycles();     // 总循环数
+            sd.vsp_voltage_x10 = g_params.vsp_voltage_x10;  // VSP 电压
+            sd.vsp_enabled     = g_params.vsp_enabled;       // VSP 使能
+            sd.test_on_method  = g_params.test_on_method;    // 测试 ON 方式
             Protocol_SendStatus(&sd);
         }
     }

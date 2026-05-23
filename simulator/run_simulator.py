@@ -32,6 +32,7 @@ CMD_STOP_TEST     = 0x44
 CMD_EXPORT_DATA   = 0x50
 CMD_EXPORT_CHUNK  = 0x51
 CMD_EXPORT_DONE   = 0x52
+CMD_WRITE_VSP     = 0x60
 
 # ── CRC8 ──
 def crc8(data: bytes) -> int:
@@ -53,9 +54,9 @@ def build_frame(cmd: int, data: bytes = b'') -> bytes:
 EVENT_NONE, EVENT_CW, EVENT_CCW, EVENT_CLICK, EVENT_LONG_PRESS, EVENT_DOUBLE_CLICK = range(6)
 
 # ── Modes ──
-MODE_PWM_FG, MODE_FG, MODE_CH1, MODE_CH2, MODE_TEST = range(5)
-NUM_MODES = 5
-MODE_NAMES = ["PWM-FG", "FG模式", "CH1", "CH2", "测试模式"]
+MODE_PWM_FG, MODE_FG, MODE_CH1, MODE_CH2, MODE_VSP, MODE_TEST = range(6)
+NUM_MODES = 6
+MODE_NAMES = ["PWM-FG", "FG模式", "CH1", "CH2", "VSP", "测试模式"]
 
 # ── Items ──
 ITEM_CH1_FREQ, ITEM_CH1_DUTY, ITEM_CH2_FREQ, ITEM_CH2_DUTY, ITEM_FG_DIV = range(5)
@@ -63,8 +64,8 @@ NUM_ITEMS = 5
 
 # Test items
 TEST_ITEM_CHANNEL, TEST_ITEM_FREQ, TEST_ITEM_DUTY, TEST_ITEM_CYCLES = 0, 1, 2, 3
-TEST_ITEM_ON_TIME, TEST_ITEM_OFF_TIME, TEST_ITEM_START = 4, 5, 6
-NUM_TEST_ITEMS = 7
+TEST_ITEM_ON_TIME, TEST_ITEM_OFF_TIME, TEST_ITEM_ON_METHOD, TEST_ITEM_START = 4, 5, 6, 7
+NUM_TEST_ITEMS = 8
 
 
 class Engine:
@@ -81,6 +82,10 @@ class Engine:
         self.fg_div = 2
         self.fg_rpm = 0
 
+        # VSP params
+        self.vsp_voltage_x10 = 0  # 0~50 = 0.0~5.0V
+        self.vsp_on = False
+
         # Mode & navigation
         self.mode = MODE_PWM_FG
         self.cursor = 1
@@ -93,6 +98,7 @@ class Engine:
         self.test_cycles = 10
         self.test_on_sec = 5
         self.test_off_sec = 3
+        self.test_on_method = 0  # 0=PWM, 1=继电器, 2=两者
         self.test_running = False
         self.test_record_count = 0
         self.test_current_cycle = 0
@@ -106,6 +112,8 @@ class Engine:
             return NUM_TEST_ITEMS
         elif self.mode == MODE_PWM_FG:
             return NUM_ITEMS
+        elif self.mode == MODE_VSP:
+            return 2  # Voltage, Enable
         else:
             return 3  # Freq, Duty, Enable
 
@@ -122,6 +130,8 @@ class Engine:
             return [self.ch2_freq, self.ch2_duty, 0][self.cursor]
         elif self.mode == MODE_FG:
             return self.fg_div
+        elif self.mode == MODE_VSP:
+            return [self.vsp_voltage_x10, 0][self.cursor]
         return 0
 
     def _set_value(self, v):
@@ -142,10 +152,13 @@ class Engine:
             elif self.cursor == 1: self.ch2_duty = max(0, min(100, v))
         elif self.mode == MODE_FG:
             self.fg_div = max(1, min(99, v))
+        elif self.mode == MODE_VSP:
+            if self.cursor == 0: self.vsp_voltage_x10 = max(0, min(50, v))
 
     def _get_test_value(self):
         return [self.test_channel, self.test_freq, self.test_duty,
-                self.test_cycles, self.test_on_sec, self.test_off_sec, 0][self.cursor]
+                self.test_cycles, self.test_on_sec, self.test_off_sec,
+                self.test_on_method, 0][self.cursor]
 
     def _set_test_value(self, delta):
         if self.cursor == TEST_ITEM_CHANNEL:
@@ -160,6 +173,9 @@ class Engine:
             self.test_on_sec = max(1, min(60, self.test_on_sec + delta))
         elif self.cursor == TEST_ITEM_OFF_TIME:
             self.test_off_sec = max(1, min(60, self.test_off_sec + delta))
+        elif self.cursor == TEST_ITEM_ON_METHOD:
+            self.test_on_method = (self.test_on_method + delta) % 3
+            if self.test_on_method > 2: self.test_on_method = 0
 
     def process(self, ev):
         if ev == EVENT_NONE:
@@ -234,6 +250,15 @@ class Engine:
                     self.ch2_on = not self.ch2_on
             elif ev == EVENT_LONG_PRESS:
                 self.selected = True
+        elif self.mode == MODE_VSP:
+            if ev == EVENT_CW:
+                self._set_value(self._get_value() + 1)
+            elif ev == EVENT_CCW:
+                self._set_value(self._get_value() - 1)
+            elif ev == EVENT_CLICK:
+                self.vsp_on = not self.vsp_on
+            elif ev == EVENT_LONG_PRESS:
+                self.selected = True
 
 
 # ── Serial communication ──
@@ -296,6 +321,9 @@ class SerialComm:
     def send_export_data(self):
         self._send(build_frame(CMD_EXPORT_DATA))
 
+    def send_write_vsp(self, voltage_x10, enabled):
+        self._send(build_frame(CMD_WRITE_VSP, struct.pack('BB', voltage_x10, enabled)))
+
     def poll(self):
         """Read available bytes, parse frames, return (cmd, data) or None."""
         if not self.connected or not self.ser:
@@ -328,8 +356,8 @@ class SerialComm:
         return None
 
     def read_status_data(self, data):
-        """Parse StatusData from frame data (25 bytes)."""
-        if len(data) < 25:
+        """Parse StatusData from frame data (28 bytes)."""
+        if len(data) < 28:
             return None
         return {
             'ch1_freq':    struct.unpack_from('<I', data, 0)[0],
@@ -345,6 +373,9 @@ class SerialComm:
             'test_state':  data[20],
             'test_cycle':  struct.unpack_from('<H', data, 21)[0],
             'test_total':  struct.unpack_from('<H', data, 23)[0],
+            'vsp_voltage': data[25],
+            'vsp_on':      bool(data[26]),
+            'test_on_method': data[27],
         }
 
 
@@ -631,6 +662,8 @@ class OLEDWidget(QWidget):
             self._render_ch(eng, 1)
         elif eng.mode == MODE_CH2:
             self._render_ch(eng, 2)
+        elif eng.mode == MODE_VSP:
+            self._render_vsp(eng)
         elif eng.mode == MODE_TEST:
             self._render_test(eng)
 
@@ -724,7 +757,36 @@ class OLEDWidget(QWidget):
         self._hline(80, 126, 11)
         self._text_r(125, 2, str(eng.fg_rpm))
 
-    # ── Mode 4: TEST ──
+    # ── Mode 4: VSP ──
+    def _render_vsp(self, eng):
+        self._rect(0, 0, OLED_W, OLED_H)
+        self._hline(1, 126, 11)
+        self._text(34, 2, "VSP CTRL")
+
+        voltage = eng.vsp_voltage_x10 / 10.0
+        on = eng.vsp_on
+
+        self._circle(3, 14, on)
+        self._text(12, 14, "ON" if on else "OFF")
+
+        # 大号电压数字
+        v_str = f"{voltage:.1f}V"
+        self._text(30, 24, v_str)
+
+        # 百分比条
+        pct = eng.vsp_voltage_x10 * 2  # 0~100
+        bar_w = 100
+        fill_w = bar_w * pct // 100
+        self._rect(14, 40, bar_w, 6)
+        for x2 in range(14, 14 + fill_w):
+            for y2 in range(40, 46):
+                self.buf.setPixel(x2, y2, 1)
+
+        self._hline(1, 126, 50)
+        self._row(eng, 3, 53, 62, 0, "Vout", f"{voltage:.1f}V")
+        self._row(eng, 68, 53, 125, 1, "EN", "ON" if on else "OFF")
+
+    # ── Mode 5: TEST ──
     def _render_test(self, eng):
         self._rect(0, 0, OLED_W, OLED_H)
         self._hline(1, 126, 11)
@@ -751,8 +813,10 @@ class OLEDWidget(QWidget):
             trow(66, 28, 125, TEST_ITEM_CYCLES, "N", str(eng.test_cycles))
             trow(3, 40, 62, TEST_ITEM_ON_TIME, "ON", f"{eng.test_on_sec}s")
             trow(66, 40, 125, TEST_ITEM_OFF_TIME, "OFF", f"{eng.test_off_sec}s")
+            method_names = ["PWM", "Relay", "Both"]
+            trow(3, 52, 62, TEST_ITEM_ON_METHOD, "Mode", method_names[eng.test_on_method])
 
-            self._hline(1, 126, 51)
+            self._hline(66, 126, 51)
             self._text(40, 54, self._marker(eng, TEST_ITEM_START))
             self._text(48, 54, "START")
 
@@ -1107,7 +1171,7 @@ class MainWindow(QMainWindow):
             "【操作】旋转旋钮调参  |  点击OK启停通道  |  长按OK选择项目  |  双击OK切换模式\n"
             "【模式】PWM-FG:双通道输出  FG:频率计  CH1/CH2:单通道调节  TEST:自动测试循环\n"
             "【串口】选择COM口 → 点击「连接」，参数自动同步，测试数据可导出CSV\n"
-            "【键盘】↑↓=调参  Enter/空格=启停  L=选择  M=切模式  1~5=跳转模式  Esc=退出"
+            "【键盘】↑↓=调参  Enter/空格=启停  L=选择  M=切模式  1~6=跳转模式  Esc=退出"
         )
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color:#606878; font-size:10px; font-weight:normal; line-height:1.4;")
@@ -1144,8 +1208,8 @@ class MainWindow(QMainWindow):
     # ── Keyboard shortcuts ──
     def keyPressEvent(self, ev):
         key = ev.key()
-        # 1~5: 直接跳转模式
-        if Qt.Key.Key_1 <= key <= Qt.Key.Key_5:
+        # 1~6: 直接跳转模式
+        if Qt.Key.Key_1 <= key <= Qt.Key.Key_6:
             self.eng.mode = key - Qt.Key.Key_1
             self.eng.cursor = 0
             self.eng.selected = False
@@ -1224,6 +1288,9 @@ class MainWindow(QMainWindow):
                     self.eng.mode = status['mode']
                     self.eng.test_running = (status['test_state'] == 1)
                     self.eng.test_current_cycle = status['test_cycle']
+                    self.eng.vsp_voltage_x10 = status.get('vsp_voltage', 0)
+                    self.eng.vsp_on = status.get('vsp_on', False)
+                    self.eng.test_on_method = status.get('test_on_method', 0)
                     self._refresh()
             elif cmd == CMD_EXPORT_CHUNK:
                 # Receive CSV line
@@ -1285,6 +1352,8 @@ class MainWindow(QMainWindow):
                     self.serial.send_write_pwm(2, self.eng.ch2_freq, self.eng.ch2_duty, self.eng.ch2_on)
                 elif self.eng.mode == MODE_FG:
                     self.serial.send_write_fg_div(self.eng.fg_div)
+                elif self.eng.mode == MODE_VSP:
+                    self.serial.send_write_vsp(self.eng.vsp_voltage_x10, self.eng.vsp_on)
 
             if ev == EVENT_CLICK and not self.eng.selected:
                 if self.eng.mode == MODE_PWM_FG:
@@ -1299,6 +1368,8 @@ class MainWindow(QMainWindow):
                         self.serial.send_write_pwm(1, self.eng.ch1_freq, self.eng.ch1_duty, self.eng.ch1_on)
                     else:
                         self.serial.send_write_pwm(2, self.eng.ch2_freq, self.eng.ch2_duty, self.eng.ch2_on)
+                elif self.eng.mode == MODE_VSP:
+                    self.serial.send_write_vsp(self.eng.vsp_voltage_x10, self.eng.vsp_on)
 
     def _refresh(self):
         self.oled.render(self.eng)
@@ -1313,7 +1384,7 @@ class MainWindow(QMainWindow):
                 lbl = f"测试运行中  第{self.eng.test_current_cycle}/{self.eng.test_cycles}轮"
             else:
                 names = {0: "通道", 1: "频率", 2: "占空比", 3: "循环数",
-                         4: "ON时间", 5: "OFF时间", 6: "开始"}
+                         4: "ON时间", 5: "OFF时间", 6: "ON方式", 7: "开始"}
                 lbl = f"测试: {names.get(self.eng.cursor, '')}"
                 if self.eng.selected:
                     lbl += "  [选择]"
@@ -1328,6 +1399,11 @@ class MainWindow(QMainWindow):
                 lbl += "  [选择]"
         elif mode == MODE_CH2:
             names = {0: "CH2频率", 1: "CH2占空比", 2: "CH2使能"}
+            lbl = names.get(self.eng.cursor, "")
+            if self.eng.selected:
+                lbl += "  [选择]"
+        elif mode == MODE_VSP:
+            names = {0: "VSP电压", 1: "VSP使能"}
             lbl = names.get(self.eng.cursor, "")
             if self.eng.selected:
                 lbl += "  [选择]"

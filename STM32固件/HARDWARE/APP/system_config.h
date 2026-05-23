@@ -22,6 +22,8 @@
  *  │  OK 按键      │  PB8   │  GPIO      │  IPU     │  确认键(内部上拉)  │
  *  │  USART TX    │  PA9   │  USART1    │  AF_PP   │  UART 发送         │
  *  │  USART RX    │  PA10  │  USART1    │  Input   │  UART 接收         │
+ *  │  DAC VSP     │  PA4   │  DAC_CH1   │  AIN     │  VSP 模拟电压输出   │
+ *  │  RELAY       │  PB5   │  GPIO      │  Out_PP  │  继电器控制        │
  *  └──────────────┴────────┴────────────┴──────────┴────────────────────┘
  *
  *  【已取消的外设】

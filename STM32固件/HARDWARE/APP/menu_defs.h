@@ -17,8 +17,8 @@
 /* ══════════════════════════════════════════════
  *  应用模式 (AppMode)
  * ══════════════════════════════════════════════
- *  用户通过双击旋转编码器在 5 种模式间循环切换:
- *    PWM_FG → FG → CH1 → CH2 → TEST → PWM_FG ...
+ *  用户通过双击旋转编码器在 6 种模式间循环切换:
+ *    PWM_FG → FG → CH1 → CH2 → VSP → TEST → PWM_FG ...
  *
  *  每种模式对应一种 OLED 界面布局和一组交互逻辑。
  *  模式编号同时用于 OLED 渲染分发和串口状态上报。
@@ -28,7 +28,8 @@ typedef enum {
     MODE_FG,            // 模式1: 纯频率计模式，大号 RPM 数字显示
     MODE_CH1,           // 模式2: CH1 单通道 PWM 参数调节
     MODE_CH2,           // 模式3: CH2 单通道 PWM 参数调节
-    MODE_TEST,          // 模式4: 自动测试模式 (ON/OFF 循环 + 数据记录)
+    MODE_VSP,           // 模式4: VSP 模拟电压输出 (0~5V DAC)
+    MODE_TEST,          // 模式5: 自动测试模式 (ON/OFF 循环 + 数据记录)
     NUM_MODES           // 模式总数 (用于模运算切换)
 } AppMode;
 
@@ -51,6 +52,18 @@ typedef enum {
 } CursorItem;
 
 /* ══════════════════════════════════════════════
+ *  VSP 模式光标项 (VspCursorItem)
+ * ══════════════════════════════════════════════
+ *  VSP 模式下有 2 个可调节参数项:
+ *    输出电压 (0.0~5.0V) → 使能开关
+ */
+typedef enum {
+    VSP_ITEM_VOLTAGE = 0,   // VSP 输出电压 (0.0~5.0V, 0.1V步进, 存储值×10)
+    VSP_ITEM_ENABLE,        // VSP 使能开关 (0=关, 1=开)
+    NUM_VSP_ITEMS           // VSP 参数项总数
+} VspCursorItem;
+
+/* ══════════════════════════════════════════════
  *  测试模式光标项 (TestCursorItem)
  * ══════════════════════════════════════════════
  *  测试模式下有 7 个可配置项，两列布局:
@@ -65,8 +78,9 @@ typedef enum {
     TEST_ITEM_CYCLES,       // 总循环次数 (1~999)
     TEST_ITEM_ON_TIME,      // 每轮 ON 持续时间 (秒, 1~60)
     TEST_ITEM_OFF_TIME,     // 每轮 OFF 持续时间 (秒, 1~60)
+    TEST_ITEM_ON_METHOD,    // ON 方式 (0=PWM开关, 1=继电器, 2=两者)
     TEST_ITEM_START,        // 启动测试按钮 (短按触发)
-    NUM_TEST_ITEMS          // 测试参数项总数
+    NUM_TEST_ITEMS          // 测试参数项总数 (9)
 } TestCursorItem;
 
 /* ══════════════════════════════════════════════
@@ -151,6 +165,9 @@ typedef struct {
     u8  ch2_enabled;        // CH2 输出使能 (0=关, 1=开)
     u8  fg_div;             // FG 输入分频系数 (1~99)
     u16 fg_pulses_per_rev;  // FG 每转脉冲数 (默认2, 用于 RPM 计算)
+    u8  vsp_voltage_x10;    // VSP 输出电压 ×10 (0~50, 即 0.0~5.0V)
+    u8  vsp_enabled;        // VSP 使能 (0=关, 1=开)
+    u8  test_on_method;     // 测试 ON 方式 (0=PWM, 1=继电器, 2=两者)
 } SystemParams;
 
 /* ══════════════════════════════════════════════
@@ -188,6 +205,9 @@ typedef struct {
     u8  test_state;     // 测试状态 (0=空闲, 1=运行, 2=完成)
     u16 test_cycle;     // 当前测试循环
     u16 test_total;     // 总循环数
+    u8  vsp_voltage_x10;// VSP 电压 ×10 (0~50 = 0.0~5.0V)
+    u8  vsp_enabled;    // VSP 使能
+    u8  test_on_method; // 测试 ON 方式 (0=PWM, 1=继电器, 2=两者)
 } StatusData;
 
 /* ══════════════════════════════════════════════
@@ -221,7 +241,14 @@ typedef struct {
     u16 cycles;             // 循环次数 (1~999)
     u16 on_time_sec;        // ON 持续时间 (秒, 1~60)
     u16 off_time_sec;       // OFF 持续时间 (秒, 1~60)
+    u8  on_method;          // ON 方式 (0=PWM, 1=继电器, 2=两者)
 } TestConfig;
+
+// CMD_WRITE_VSP (0x60): PC 写入 VSP 参数
+typedef struct {
+    u8  voltage_x10;        // VSP 电压 ×10 (0~50 = 0.0~5.0V)
+    u8  enabled;            // VSP 使能 (0=关, 1=开)
+} VspWriteReq;
 
 /* ══════════════════════════════════════════════
  *  协议命令字 (ProtocolCmd)
@@ -245,7 +272,8 @@ typedef enum {
     CMD_STOP_TEST     = 0x44,   // 停止测试 (PC→MCU, 无数据)
     CMD_EXPORT_DATA   = 0x50,   // 请求导出CSV (PC→MCU, 无数据)
     CMD_EXPORT_CHUNK  = 0x51,   // CSV数据块 (MCU→PC, ≤64B)
-    CMD_EXPORT_DONE   = 0x52    // 导出完成 (MCU→PC, 无数据)
+    CMD_EXPORT_DONE   = 0x52,   // 导出完成 (MCU→PC, 无数据)
+    CMD_WRITE_VSP     = 0x60    // 写VSP参数 (PC→MCU, VspWriteReq 2B)
 } ProtocolCmd;
 
 // ── 帧头标识 ──

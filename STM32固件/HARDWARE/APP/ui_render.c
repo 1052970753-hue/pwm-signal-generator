@@ -22,6 +22,7 @@
  *   render_pwm_fg():    MODE_PWM_FG — 双通道 + 频率计 (5 参数)
  *   render_fg_mode():   MODE_FG — 纯频率计 (大号 RPM)
  *   render_ch_mode():   MODE_CH1/CH2 — 单通道 PWM (3 参数)
+ *   render_vsp_mode():  MODE_VSP — VSP 模拟电压 (2 参数)
  *   render_test_mode(): MODE_TEST — 自动测试 (配置/运行)
  */
 #include "ui_render.h"
@@ -281,7 +282,78 @@ static void render_ch_mode(SystemParams *p, u8 channel, u16 rpm, u8 blink) {
 }
 
 /* ════════════════════════════════════════════════════════════
- *  模式 4: TEST 自动测试
+ *  模式 4: VSP 模拟电压输出
+ * ════════════════════════════════════════════════════════════
+ *
+ *  OLED 布局:
+ *  ┌─────────────────────┐
+ *  │     VSP CTRL        │ 行0 (y=0):   标题
+ *  │ O ON                │ 行1 (y=8):   ON/OFF 状态
+ *  │                     │
+ *  │    3.5V             │ 行3 (y=24):  大号电压显示
+ *  │ [=========         ]│ 行4 (y=32):  百分比进度条
+ *  │---------------------│ 行5 (y=40):  分隔线
+ *  │>Vout:3.5V   EN:ON   │ 行6 (y=48):  电压值 + 使能 (cursor=0,1)
+ *  │                     │ 行7 (y=56):  (未使用)
+ *  └─────────────────────┘
+ */
+static void render_vsp_mode(SystemParams *p, u8 blink) {
+    u8 buf[12];
+    u8 cur = g_menu.cursor;
+    u8 sel = g_menu.selected;
+    u8 v = p->vsp_voltage_x10;  // 0~50
+
+    OLED_Clear();
+
+    // 行0 (y=0): 标题 "VSP CTRL", 水平居中
+    OLED_ShowString(24, 0, "VSP CTRL", 8, 1);
+
+    // 行1 (y=8): ON/OFF 状态
+    OLED_ShowString(0, 8, (const u8 *)(p->vsp_enabled ? "O ON " : "  OFF"), 8, 1);
+
+    // 行3 (y=24): 电压值 "X.XV"
+    buf[0] = '0' + (v / 10);    // 整数位
+    buf[1] = '.';
+    buf[2] = '0' + (v % 10);    // 小数位
+    buf[3] = 'V';
+    buf[4] = 0;
+    OLED_ShowString(42, 24, buf, 8, 1);
+
+    // 行4 (y=32): 进度条 (v/50 * 100%)
+    {
+        u8 bar_len = (u8)((u32)v * 20 / 50);  // 最多 20 个字符
+        u8 i;
+        OLED_ShowString(4, 32, "[", 8, 1);
+        for (i = 0; i < 20; i++) {
+            buf[0] = (i < bar_len) ? '=' : ' ';
+            buf[1] = 0;
+            OLED_ShowString(10 + i * 6, 32, buf, 8, 1);
+        }
+        OLED_ShowString(128 - 6, 32, "]", 8, 1);
+    }
+
+    // 行5 (y=40): 分隔线
+    OLED_ShowString(0, 40, "---------------------", 8, 1);
+
+    // 行6 (y=48): Vout 值 + EN 状态
+    OLED_ShowString(0, 48, marker_str(cur, sel, VSP_ITEM_VOLTAGE, blink), 8, 1);
+    OLED_ShowString(6, 48, "Vout:", 8, 1);
+    buf[0] = '0' + (v / 10);
+    buf[1] = '.';
+    buf[2] = '0' + (v % 10);
+    buf[3] = 'V';
+    buf[4] = 0;
+    OLED_ShowString(36, 48, buf, 8, 1);
+
+    OLED_ShowString(72, 48, marker_str(cur, sel, VSP_ITEM_ENABLE, blink), 8, 1);
+    OLED_ShowString(78, 48, "EN:", 8, 1);
+    OLED_ShowString(96, 48, (const u8 *)(p->vsp_enabled ? "ON " : "OFF"), 8, 1);
+
+    OLED_Refresh();
+}
+
+/* ════════════════════════════════════════════════════════════
+ *  模式 5: TEST 自动测试
  * ════════════════════════════════════════════════════════════
  *
  *  两种子状态:
@@ -401,6 +473,16 @@ static void render_test_mode(SystemParams *p, u16 rpm, u8 blink) {
         OLED_ShowString(96, 24, buf, 8, 1);
         OLED_ShowString(114, 24, "s", 8, 1);                       // 秒
 
+        // 行4 (y=32): ON 方式 (PWM/Relay/Both)
+        OLED_ShowString(0, 32, marker_str(cur, sel, TEST_ITEM_ON_METHOD, blink), 8, 1);
+        OLED_ShowString(6, 32, "Mode:", 8, 1);
+        {
+            const u8 *method_names[] = {(const u8 *)"PWM", (const u8 *)"Rly", (const u8 *)"Bth"};
+            u8 m = Menu_GetTestOnMethod();
+            if (m > 2) m = 0;
+            OLED_ShowString(36, 32, method_names[m], 8, 1);
+        }
+
         // 行5 (y=40): 分隔线 — 21 个 "-"
         OLED_ShowString(0, 40, "---------------------", 8, 1);
 
@@ -438,6 +520,7 @@ void UI_Render(SystemParams *p, u16 rpm, u8 blink) {
         case MODE_FG:     render_fg_mode(p, rpm, blink); break;    // 纯频率计
         case MODE_CH1:    render_ch_mode(p, 1, rpm, blink); break; // CH1 单通道
         case MODE_CH2:    render_ch_mode(p, 2, rpm, blink); break; // CH2 单通道
+        case MODE_VSP:    render_vsp_mode(p, blink); break;        // VSP 模拟电压
         case MODE_TEST:   render_test_mode(p, rpm, blink); break;  // 自动测试
         default:          render_pwm_fg(p, rpm, blink); break;     // 默认回退到 PWM-FG
     }

@@ -111,6 +111,9 @@ u16 Menu_GetTestOffSec(void);
 // 获取已记录的测试数据条数
 u16 Menu_GetTestRecordCount(void);
 
+// 获取测试 ON 方式 (0=PWM, 1=继电器, 2=两者)
+u8  Menu_GetTestOnMethod(void);
+
 // 设置测试配置参数 (由PC端通过串口协议下发)
 // 参数 cfg: 指向 TestConfig 结构体的指针, 包含通道/频率/占空比/循环次数等
 void Menu_SetTestConfig(TestConfig *cfg);

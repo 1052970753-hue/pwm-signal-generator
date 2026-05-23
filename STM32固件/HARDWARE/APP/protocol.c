@@ -35,6 +35,7 @@
 #include "menu.h"
 #include "system_config.h"
 #include "pwm_engine.h"
+#include "dac_output.h"
 #include "../../SYSTEM/usart/usart.h"
 #include <string.h>
 
@@ -316,6 +317,9 @@ static void handle_read_status(void) {
     sd.test_state    = Menu_IsTestRunning() ? 1 : 0;    // 测试运行状态
     sd.test_cycle    = 0;                                // 当前测试循环 (由 main.c 填入)
     sd.test_total    = Menu_GetTestCycles();             // 测试总循环数
+    sd.vsp_voltage_x10 = g_params.vsp_voltage_x10;      // VSP 电压 ×10
+    sd.vsp_enabled     = g_params.vsp_enabled;           // VSP 使能
+    sd.test_on_method  = g_params.test_on_method;        // 测试 ON 方式
     send_frame(CMD_READ_STATUS, (const u8 *)&sd, sizeof(StatusData));
 }
 
@@ -378,6 +382,28 @@ void Protocol_ProcessExport(void) {
     }
 }
 
+/* ── CMD_WRITE_VSP: PC 写入 VSP 参数 ──
+ * 数据: VspWriteReq 结构体 {voltage_x10, enabled}
+ * voltage_x10 范围: 0~50 (0.0~5.0V)
+ * 直接调用 DAC 输出并更新 g_params
+ */
+static void handle_write_vsp(void) {
+    if (frame_len != sizeof(VspWriteReq)) return;
+    VspWriteReq *req = (VspWriteReq *)frame_data;
+
+    if (req->voltage_x10 <= 50)
+        g_params.vsp_voltage_x10 = req->voltage_x10;
+    g_params.vsp_enabled = req->enabled ? 1 : 0;
+
+    if (g_params.vsp_enabled) {
+        DAC_Output_SetVoltage(g_params.vsp_voltage_x10);
+    } else {
+        DAC_Output_Off();
+    }
+    g_menu.dirty = 1;
+    send_ack(CMD_WRITE_VSP);
+}
+
 /* ════════════════════════════════════════════════════════════
  *  命令分发器 — 根据 CMD 字节调用对应的处理函数
  * ════════════════════════════════════════════════════════════
@@ -401,6 +427,7 @@ static void dispatch_frame(void) {
         case CMD_START_TEST:   handle_start_test();     break;  // 启动测试
         case CMD_STOP_TEST:    handle_stop_test();      break;  // 停止测试
         case CMD_EXPORT_DATA:  handle_export_data();    break;  // 导出数据
+        case CMD_WRITE_VSP:    handle_write_vsp();      break;  // 写入 VSP
         default: break;                                         // 未知命令, 忽略
     }
 }
