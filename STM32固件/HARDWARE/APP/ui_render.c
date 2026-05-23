@@ -1,5 +1,5 @@
 /*
- * ui_render.c — OLED 5 模式界面渲染
+ * ui_render.c — OLED 7 模式界面渲染
  * ══════════════════════════════════════════════════════════════
  *
  * 【硬件】
@@ -18,12 +18,13 @@
  *   OLED_Clear() → 绘制各元素 → OLED_Refresh()
  *   由 main.c 以 50ms (20fps) 周期调用 UI_Render()
  *
- * 【5 种渲染模式】
+ * 【7 种渲染模式】
  *   render_pwm_fg():    MODE_PWM_FG — 双通道 + 频率计 (5 参数)
  *   render_fg_mode():   MODE_FG — 纯频率计 (大号 RPM)
  *   render_ch_mode():   MODE_CH1/CH2 — 单通道 PWM (3 参数)
  *   render_vsp_mode():  MODE_VSP — VSP 模拟电压 (2 参数)
  *   render_test_mode(): MODE_TEST — 自动测试 (配置/运行)
+ *   render_game_mode(): MODE_GAME — Flappy Bird 小游戏
  */
 #include "ui_render.h"
 #include "../OLED_IIC/oled.h"
@@ -505,6 +506,158 @@ static void render_test_mode(SystemParams *p, u16 rpm, u8 blink) {
 }
 
 /* ════════════════════════════════════════════════════════════
+ *  模式 6: GAME Flappy Bird 小游戏
+ * ════════════════════════════════════════════════════════════
+ *
+ *  OLED 布局:
+ *  ┌─────────────────────┐
+ *  │ FLAPPY BIRD      3  │ y=0:   标题 + 分数
+ *  │                     │ y=8:   (游戏区域)
+ *  │       >             │ y=10:  小鸟 (4x4px)
+ *  │         ┌────┐      │ y=20+: 管道 (12px宽, 16px间隙)
+ *  │         │    │      │
+ *  │         └────┘      │
+ *  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ y=60~63: 地面
+ *  └─────────────────────┘
+ *
+ *  状态机: READY → PLAYING → GAMEOVER
+ *  点击旋钮: READY=开始, PLAYING=跳跃, GAMEOVER=重新开始
+ */
+#define GAME_READY    0
+#define GAME_PLAYING  1
+#define GAME_OVER     2
+
+#define BIRD_X       20      // 小鸟固定 x 坐标
+#define BIRD_SIZE    4       // 小鸟大小 (4x4 px)
+#define PIPE_W       12      // 管道宽度
+#define PIPE_GAP     16      // 管道间隙 (竖直空间)
+#define GROUND_Y     60      // 地面 y 坐标
+#define GRAVITY      1       // 每帧重力加速度 (px)
+#define FLAP_VY      (-4)    // 跳跃速度
+
+static s8  bird_y;           // 小鸟 y 坐标 (0~56)
+static s8  bird_vy;          // 小鸟竖直速度
+static s8  pipe_x[2];       // 两根管道的 x 坐标 (右边缘)
+static s8  pipe_gap_y[2];   // 两根管道间隙的顶部 y 坐标
+static u8  game_score;       // 当前分数
+static u8  game_state;       // GAME_READY / GAME_PLAYING / GAME_OVER
+static u8  prev_render_mode = 0xFF;  // 上次渲染的模式 (用于检测模式切换)
+
+static void render_game_mode(u8 blink) {
+    u8 buf[4];
+    u8 i;
+
+    /* ── 模式切换时重置游戏状态 ── */
+    if (prev_render_mode != MODE_GAME) {
+        bird_y = 28; bird_vy = 0;
+        pipe_x[0] = 80; pipe_gap_y[0] = 20;
+        pipe_x[1] = 120; pipe_gap_y[1] = 30;
+        game_score = 0;
+        game_state = GAME_READY;
+    }
+    prev_render_mode = MODE_GAME;
+
+    /* ── 处理点击事件 ── */
+    if (game_click) {
+        game_click = 0;
+        if (game_state == GAME_READY) {
+            game_state = GAME_PLAYING;
+            bird_vy = FLAP_VY;
+        } else if (game_state == GAME_PLAYING) {
+            bird_vy = FLAP_VY;
+        } else {  // GAME_OVER
+            bird_y = 28; bird_vy = 0;
+            pipe_x[0] = 80; pipe_gap_y[0] = 20;
+            pipe_x[1] = 120; pipe_gap_y[1] = 30;
+            game_score = 0;
+            game_state = GAME_PLAYING;
+            bird_vy = FLAP_VY;
+        }
+    }
+
+    /* ── 物理更新 (PLAYING 状态) ── */
+    if (game_state == GAME_PLAYING) {
+        bird_vy += GRAVITY;
+        bird_y += bird_vy;
+        if (bird_y < 0) { bird_y = 0; bird_vy = 0; }
+
+        for (i = 0; i < 2; i++) {
+            pipe_x[i]--;
+            if (pipe_x[i] < -PIPE_W) {
+                pipe_x[i] = 128;
+                pipe_gap_y[i] = 8 + (u8)(bird_y + (i * 7)) % 34;
+            }
+            if (pipe_x[i] + PIPE_W == BIRD_X)
+                game_score++;
+        }
+
+        /* ── 碰撞检测 ── */
+        if (bird_y + BIRD_SIZE >= GROUND_Y) {
+            game_state = GAME_OVER;
+        } else {
+            for (i = 0; i < 2; i++) {
+                s8 px = pipe_x[i];
+                if (BIRD_X + BIRD_SIZE > px && BIRD_X < px + PIPE_W) {
+                    if (bird_y < pipe_gap_y[i] || bird_y + BIRD_SIZE > pipe_gap_y[i] + PIPE_GAP) {
+                        game_state = GAME_OVER;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /* ── 渲染 ── */
+    OLED_Clear();
+
+    // 标题 + 分数
+    OLED_ShowString(0, 0, "FLAPPY BIRD", 8, 1);
+    buf[0] = '0' + (game_score / 10) % 10;
+    buf[1] = '0' + game_score % 10;
+    buf[2] = 0;
+    OLED_ShowString(108, 0, buf, 8, 1);
+
+    // 管道 (两根, 每根上下两段)
+    for (i = 0; i < 2; i++) {
+        s8 px = pipe_x[i];
+        s8 gap_top = pipe_gap_y[i];
+        s8 gap_bot = gap_top + PIPE_GAP;
+        if (px >= -PIPE_W && px < 128) {
+            u8 x0 = (px < 0) ? 0 : (u8)px;
+            u8 x1 = (px + PIPE_W > 128) ? 127 : (u8)(px + PIPE_W - 1);
+            u8 x;
+            for (x = x0; x <= x1; x++) {
+                if (gap_top > 8) OLED_DrawLine(x, 8, x, gap_top - 1, 1);
+                if (gap_bot < GROUND_Y) OLED_DrawLine(x, gap_bot, x, GROUND_Y - 1, 1);
+            }
+        }
+    }
+
+    // 小鸟 (4x4 px, GAMEOVER 时闪烁)
+    if (game_state != GAME_OVER || blink) {
+        u8 by = (u8)bird_y;
+        u8 bx, byy;
+        for (bx = BIRD_X; bx < BIRD_X + BIRD_SIZE; bx++)
+            for (byy = by; byy < by + BIRD_SIZE; byy++)
+                OLED_DrawPoint(bx, byy, 1);
+    }
+
+    // 地面 (双线)
+    OLED_DrawLine(0, GROUND_Y, 127, GROUND_Y, 1);
+    OLED_DrawLine(0, GROUND_Y + 2, 127, GROUND_Y + 2, 1);
+
+    // 状态文字
+    if (game_state == GAME_READY) {
+        OLED_ShowString(28, 30, "Click=Start", 8, 1);
+    } else if (game_state == GAME_OVER) {
+        OLED_ShowString(22, 28, "GAME OVER", 8, 1);
+        OLED_ShowString(22, 40, "Click=Retry", 8, 1);
+    }
+
+    OLED_Refresh();
+}
+
+/* ════════════════════════════════════════════════════════════
  *  渲染分发函数 — 主循环入口
  * ════════════════════════════════════════════════════════════
  *  由 main.c 每 50ms (20fps) 调用一次
@@ -524,6 +677,8 @@ void UI_Render(SystemParams *p, u16 rpm, u8 blink) {
         case MODE_CH2:    render_ch_mode(p, 2, rpm, blink); break; // CH2 单通道
         case MODE_VSP:    render_vsp_mode(p, blink); break;        // VSP 模拟电压
         case MODE_TEST:   render_test_mode(p, rpm, blink); break;  // 自动测试
+        case MODE_GAME:   render_game_mode(blink); break;          // Flappy Bird 小游戏
         default:          render_pwm_fg(p, rpm, blink); break;     // 默认回退到 PWM-FG
     }
+    prev_render_mode = g_menu.mode;
 }

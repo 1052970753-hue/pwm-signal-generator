@@ -38,7 +38,7 @@ typedef enum {
     NUM_TEST_ITEMS          // 8
 } TestCursorItem;
 
-// Application modes — 6 modes
+// Application modes — 7 modes
 typedef enum {
     MODE_PWM_FG = 0,  // Default: dual channel + FG
     MODE_FG,           // FG only, large RPM display
@@ -46,7 +46,8 @@ typedef enum {
     MODE_CH2,          // CH2 PWM only
     MODE_VSP,          // VSP analog voltage output (DAC 0~5V)
     MODE_TEST,         // Auto start/stop test
-    NUM_MODES          // 6
+    MODE_GAME,         // Flappy Bird mini-game
+    NUM_MODES          // 7
 } AppMode;
 
 typedef enum {

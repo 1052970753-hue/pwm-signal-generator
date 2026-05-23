@@ -1,13 +1,15 @@
 /*
- * menu.c — 5 模式菜单状态机
+ * menu.c — 7 模式菜单状态机
  * ══════════════════════════════════════════════════════════════
  *
- * 【5 种模式 — 双击循环切换】
+ * 【7 种模式 — 双击循环切换】
  *   MODE_PWM_FG (0): PWM 双通道 + 频率计 (5 个参数项)
  *   MODE_FG     (1): 纯频率计模式 (1 个参数: 分频系数)
  *   MODE_CH1    (2): CH1 单通道 PWM (3 个参数: 频率/占空比/使能)
  *   MODE_CH2    (3): CH2 单通道 PWM (同 CH1)
  *   MODE_TEST   (4): 自动测试模式 (7 个参数项 + 运行状态)
+ *   MODE_VSP    (5): VSP 模拟电压输出 (0~5V DAC)
+ *   MODE_GAME   (6): Flappy Bird 小游戏 (旋钮点击控制)
  *
  * 【两种操作模式】
  *   调节模式 (selected=0): 旋转编码器调节当前光标项的值
@@ -52,6 +54,7 @@ u16 test_cycles = 10;       // 循环次数, 范围 1~999
 u16 test_on_sec = 5;        // ON 阶段持续时间 (秒), 范围 1~60
 u16 test_off_sec = 3;       // OFF 阶段持续时间 (秒), 范围 1~60
 u8  test_running = 0;       // 测试运行中标志 (0=停止, 1=运行中)
+u8  game_click = 0;         // GAME 模式点击事件 (1=有点击, 渲染后清除)
 
 /* ════════════════════════════════════════════════════════════
  *  测试记录环形缓冲区
@@ -515,6 +518,10 @@ void Menu_Process(InputEvent ev) {
             max_items = NUM_ITEMS;                         // PWM-FG 模式: 5 个参数项
         else if (g_menu.mode == MODE_VSP)
             max_items = NUM_VSP_ITEMS;                     // VSP 模式: 2 个参数项
+        else if (g_menu.mode == MODE_GAME) {
+            g_menu.selected = 0;                            // GAME 模式: 无选择模式, 直接退出
+            return;
+        }
         else
             max_items = 3;                                 // CH1/CH2 模式: 3 个参数项
 
@@ -693,6 +700,19 @@ void Menu_Process(InputEvent ev) {
                     break;
                 case EVENT_LONG_PRESS:
                     g_menu.selected = 1;                           // 长按进入选择模式
+                    break;
+                default: break;
+            }
+            break;
+
+        /* ── MODE_GAME: Flappy Bird 小游戏 ──
+         * 无参数调节, 仅响应短按 (跳跃/重新开始)
+         * dirty 标志通知 ui_render.c 处理游戏状态变化
+         */
+        case MODE_GAME:
+            switch (ev) {
+                case EVENT_CLICK:
+                    game_click = 1;                            // 通知游戏渲染: 跳跃或重新开始
                     break;
                 default: break;
             }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """PWM Signal Generator — Simulator (PyQt6) with Multi-Mode & Test Support"""
-import sys, math, struct, os, time
+import sys, math, struct, os, time, random
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QFrame, QComboBox, QPushButton, QFileDialog, QGroupBox
@@ -54,9 +54,9 @@ def build_frame(cmd: int, data: bytes = b'') -> bytes:
 EVENT_NONE, EVENT_CW, EVENT_CCW, EVENT_CLICK, EVENT_LONG_PRESS, EVENT_DOUBLE_CLICK = range(6)
 
 # ── Modes ──
-MODE_PWM_FG, MODE_FG, MODE_CH1, MODE_CH2, MODE_VSP, MODE_TEST = range(6)
-NUM_MODES = 6
-MODE_NAMES = ["PWM-FG", "FG模式", "CH1", "CH2", "VSP", "测试模式"]
+MODE_PWM_FG, MODE_FG, MODE_CH1, MODE_CH2, MODE_VSP, MODE_TEST, MODE_GAME = range(7)
+NUM_MODES = 7
+MODE_NAMES = ["PWM-FG", "FG模式", "CH1", "CH2", "VSP", "测试模式", "游戏"]
 
 # ── Items ──
 ITEM_CH1_FREQ, ITEM_CH1_DUTY, ITEM_CH2_FREQ, ITEM_CH2_DUTY, ITEM_FG_DIV = range(5)
@@ -107,6 +107,14 @@ class Engine:
         self.export_csv_lines = []
         self.export_active = False
 
+        # Game state (Flappy Bird)
+        self.bird_y = 28
+        self.bird_vy = 0
+        self.pipe_x = [80, 120]
+        self.pipe_gap_y = [20, 30]
+        self.game_score = 0
+        self.game_state = 0  # 0=READY, 1=PLAYING, 2=GAMEOVER
+
     def _get_max_items(self):
         if self.mode == MODE_TEST:
             return NUM_TEST_ITEMS
@@ -114,6 +122,8 @@ class Engine:
             return NUM_ITEMS
         elif self.mode == MODE_VSP:
             return 2  # Voltage, Enable
+        elif self.mode == MODE_GAME:
+            return 0  # No items
         else:
             return 3  # Freq, Duty, Enable
 
@@ -259,6 +269,21 @@ class Engine:
                 self.vsp_on = not self.vsp_on
             elif ev == EVENT_LONG_PRESS:
                 self.selected = True
+        elif self.mode == MODE_GAME:
+            if ev == EVENT_CLICK:
+                if self.game_state == 0:  # READY
+                    self.game_state = 1
+                    self.bird_vy = -4
+                elif self.game_state == 1:  # PLAYING
+                    self.bird_vy = -4
+                else:  # GAMEOVER
+                    self.bird_y = 28
+                    self.bird_vy = 0
+                    self.pipe_x = [80, 120]
+                    self.pipe_gap_y = [20, 30]
+                    self.game_score = 0
+                    self.game_state = 1
+                    self.bird_vy = -4
 
 
 # ── Serial communication ──
@@ -666,6 +691,8 @@ class OLEDWidget(QWidget):
             self._render_vsp(eng)
         elif eng.mode == MODE_TEST:
             self._render_test(eng)
+        elif eng.mode == MODE_GAME:
+            self._render_game(eng)
 
         if animate:
             new_pixels = self._get_pixels()
@@ -829,6 +856,81 @@ class OLEDWidget(QWidget):
 
             if eng.test_record_count > 0:
                 self._text(70, 54, f"Rec:{eng.test_record_count}")
+
+    # ── Mode 6: GAME (Flappy Bird) ──
+    def _render_game(self, eng):
+        BIRD_X = 20
+        BIRD_SIZE = 4
+        PIPE_W = 12
+        PIPE_GAP = 16
+        GROUND_Y = 60
+
+        # Physics update (PLAYING)
+        if eng.game_state == 1:
+            eng.bird_vy += 1
+            eng.bird_y += eng.bird_vy
+            if eng.bird_y < 0:
+                eng.bird_y = 0
+                eng.bird_vy = 0
+
+            for i in range(2):
+                eng.pipe_x[i] -= 1
+                if eng.pipe_x[i] < -PIPE_W:
+                    eng.pipe_x[i] = 128
+                    eng.pipe_gap_y[i] = 8 + random.randint(0, 34)
+                if eng.pipe_x[i] + PIPE_W == BIRD_X:
+                    eng.game_score += 1
+
+            # Collision
+            if eng.bird_y + BIRD_SIZE >= GROUND_Y:
+                eng.game_state = 2
+            else:
+                for i in range(2):
+                    px = eng.pipe_x[i]
+                    if BIRD_X + BIRD_SIZE > px and BIRD_X < px + PIPE_W:
+                        if eng.bird_y < eng.pipe_gap_y[i] or eng.bird_y + BIRD_SIZE > eng.pipe_gap_y[i] + PIPE_GAP:
+                            eng.game_state = 2
+                            break
+
+        # Render
+        self._rect(0, 0, OLED_W, OLED_H)
+
+        # Title + score
+        self._text(0, 0, "FLAPPY BIRD")
+        score_str = f"{eng.game_score:02d}"
+        self._text(110, 0, score_str)
+
+        # Pipes
+        for i in range(2):
+            px = eng.pipe_x[i]
+            gap_top = eng.pipe_gap_y[i]
+            gap_bot = gap_top + PIPE_GAP
+            if -PIPE_W <= px < OLED_W:
+                x0 = max(0, px)
+                x1 = min(OLED_W - 1, px + PIPE_W - 1)
+                for x in range(x0, x1 + 1):
+                    if gap_top > 8:
+                        self._vline(x, 8, gap_top - 1)
+                    if gap_bot < GROUND_Y:
+                        self._vline(x, gap_bot, GROUND_Y - 1)
+
+        # Bird (4x4, blink on GAMEOVER)
+        if eng.game_state != 2 or self._blink:
+            by = eng.bird_y
+            for dy in range(BIRD_SIZE):
+                for dx in range(BIRD_SIZE):
+                    self._px(BIRD_X + dx, by + dy, True)
+
+        # Ground
+        self._hline(0, 127, GROUND_Y)
+        self._hline(0, 127, GROUND_Y + 2)
+
+        # State text
+        if eng.game_state == 0:
+            self._text(28, 30, "Click=Start")
+        elif eng.game_state == 2:
+            self._text(22, 28, "GAME OVER")
+            self._text(22, 40, "Click=Retry")
 
 
 # ── Encoder dial widget ──
@@ -1176,9 +1278,9 @@ class MainWindow(QMainWindow):
 
         help_text = QLabel(
             "【操作】旋转旋钮调参  |  点击OK启停通道  |  长按OK选择项目  |  双击OK切换模式\n"
-            "【模式】PWM-FG:双通道输出  FG:频率计  CH1/CH2:单通道调节  TEST:自动测试循环\n"
+            "【模式】PWM-FG:双通道  FG:频率计  CH1/CH2:单通道  VSP:模拟电压  TEST:自动测试  GAME:小游戏\n"
             "【串口】选择COM口 → 点击「连接」，参数自动同步，测试数据可导出CSV\n"
-            "【键盘】↑↓=调参  Enter/空格=启停  L=选择  M=切模式  1~6=跳转模式  Esc=退出"
+            "【键盘】↑↓=调参  Enter/空格=启停  L=选择  M=切模式  1~7=跳转模式  Esc=退出"
         )
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color:#606878; font-size:10px; font-weight:normal; line-height:1.4;")
@@ -1215,8 +1317,8 @@ class MainWindow(QMainWindow):
     # ── Keyboard shortcuts ──
     def keyPressEvent(self, ev):
         key = ev.key()
-        # 1~6: 直接跳转模式
-        if Qt.Key.Key_1 <= key <= Qt.Key.Key_6:
+        # 1~7: 直接跳转模式
+        if Qt.Key.Key_1 <= key <= Qt.Key.Key_7:
             self.eng.mode = key - Qt.Key.Key_1
             self.eng.cursor = 0
             self.eng.selected = False
@@ -1414,6 +1516,9 @@ class MainWindow(QMainWindow):
             lbl = names.get(self.eng.cursor, "")
             if self.eng.selected:
                 lbl += "  [选择]"
+        elif mode == MODE_GAME:
+            states = {0: "READY - 点击开始", 1: "PLAYING - 点击跳跃", 2: "GAME OVER - 点击重试"}
+            lbl = states.get(self.eng.game_state, "")
         else:
             names = {0: "CH1频率", 1: "CH1占空比", 2: "CH2频率", 3: "CH2占空比", 4: "FG分频"}
             lbl = names.get(self.eng.cursor, "")
