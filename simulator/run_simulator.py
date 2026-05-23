@@ -1106,7 +1106,8 @@ class MainWindow(QMainWindow):
         help_text = QLabel(
             "【操作】旋转旋钮调参  |  点击OK启停通道  |  长按OK选择项目  |  双击OK切换模式\n"
             "【模式】PWM-FG:双通道输出  FG:频率计  CH1/CH2:单通道调节  TEST:自动测试循环\n"
-            "【串口】选择COM口 → 点击「连接」，参数自动同步，测试数据可导出CSV"
+            "【串口】选择COM口 → 点击「连接」，参数自动同步，测试数据可导出CSV\n"
+            "【键盘】↑↓=调参  Enter/空格=启停  Tab=选择  M=切模式  1~5=跳转模式  Esc=退出"
         )
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color:#606878; font-size:10px; font-weight:normal; line-height:1.4;")
@@ -1138,6 +1139,32 @@ class MainWindow(QMainWindow):
             self.connect_btn.setEnabled(False)
 
         self._refresh()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    # ── Keyboard shortcuts ──
+    def keyPressEvent(self, ev):
+        key = ev.key()
+        # 1~5: 直接跳转模式
+        if Qt.Key.Key_1 <= key <= Qt.Key.Key_5:
+            self.eng.mode = key - Qt.Key.Key_1
+            self.eng.cursor = 0
+            self.eng.selected = False
+            self._refresh()
+            return
+        mapping = {
+            Qt.Key.Key_Up:    EVENT_CW,
+            Qt.Key.Key_W:     EVENT_CW,
+            Qt.Key.Key_Down:  EVENT_CCW,
+            Qt.Key.Key_S:     EVENT_CCW,
+            Qt.Key.Key_Return:   EVENT_CLICK,
+            Qt.Key.Key_Enter:    EVENT_CLICK,
+            Qt.Key.Key_Space:    EVENT_CLICK,
+            Qt.Key.Key_Escape:   EVENT_CLICK,
+            Qt.Key.Key_Tab:      EVENT_LONG_PRESS,
+            Qt.Key.Key_M:        EVENT_DOUBLE_CLICK,
+        }
+        if key in mapping:
+            self._on(mapping[key])
 
     def _refresh_ports(self):
         self.port_combo.clear()
