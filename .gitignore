@@ -47,3 +47,9 @@ docs/superpowers/
 simulator/dist/
 simulator/build/
 *.spec
+
+# Stale draft firmware (actual firmware is in STM32固件/)
+firmware/
+
+# Reference project (not part of this project)
+ALIENTEK MINISTM32*/

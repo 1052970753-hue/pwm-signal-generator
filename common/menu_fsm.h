@@ -18,26 +18,35 @@ typedef enum {
     NUM_ITEMS
 } CursorItem;
 
+// VSP mode cursor items
+typedef enum {
+    VSP_ITEM_VOLTAGE = 0,   // VSP output voltage (0.00~5.00V, 0.01V step)
+    VSP_ITEM_ENABLE,        // VSP enable toggle
+    NUM_VSP_ITEMS
+} VspCursorItem;
+
 // Test mode cursor items
 typedef enum {
-    TEST_ITEM_CHANNEL = 0,  // CH1 or CH2
+    TEST_ITEM_CHANNEL = 0,
     TEST_ITEM_FREQ,
     TEST_ITEM_DUTY,
     TEST_ITEM_CYCLES,
     TEST_ITEM_ON_TIME,
     TEST_ITEM_OFF_TIME,
+    TEST_ITEM_ON_METHOD,    // 0=PWM, 1=relay, 2=both
     TEST_ITEM_START,
-    NUM_TEST_ITEMS
+    NUM_TEST_ITEMS          // 8
 } TestCursorItem;
 
-// Application modes
+// Application modes — 6 modes
 typedef enum {
     MODE_PWM_FG = 0,  // Default: dual channel + FG
     MODE_FG,           // FG only, large RPM display
     MODE_CH1,          // CH1 PWM only
     MODE_CH2,          // CH2 PWM only
+    MODE_VSP,          // VSP analog voltage output (DAC 0~5V)
     MODE_TEST,         // Auto start/stop test
-    NUM_MODES
+    NUM_MODES          // 6
 } AppMode;
 
 typedef enum {
@@ -59,7 +68,7 @@ typedef enum {
 #define OLED_WIDTH  128
 #define OLED_HEIGHT 64
 
-// Menu state — 5-mode state machine (PWM_FG / FG / CH1 / CH2 / TEST)
+// Menu state — 6-mode state machine
 typedef struct {
     uint8_t cursor;    // 0..NUM_ITEMS-1
     uint8_t selected;  // 0=normal, 1=select (encoder moves cursor)
