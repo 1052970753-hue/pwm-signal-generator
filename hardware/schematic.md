@@ -16,8 +16,8 @@
 | ENC A | PA6 | 输入 | 旋转编码器 A 相 (TIM3 CH1) |
 | ENC B | PA7 | 输入 | 旋转编码器 B 相 (TIM3 CH2) |
 | ENC SW / OK | PB8 | 输入 | 编码器按键 (内部上拉) |
-| USART1 TX | PA9 | 输出 | USB-TTL 模块 RX |
-| USART1 RX | PA10 | 输入 | USB-TTL 模块 TX |
+| USART1 TX | PA9 | 输出 | CH340C RXD |
+| USART1 RX | PA10 | 输入 | CH340C TXD |
 
 ## 电源设计
 
@@ -66,28 +66,111 @@ OLED SCL → PA1
 OLED SDA → PA2
 ```
 
-## USB-TTL 接线 (CH340G)
+## USB 转串口电路 (CH340C + Type-C)
+
+板载 CH340C + Type-C 母座，直接 USB 线连接电脑，无需外部 USB-TTL 模块。
+
+### Type-C 接口
 ```
-CH340G TXD → PA10 (USART1 RX)
-CH340G RXD → PA9  (USART1 TX)
-CH340G VCC → 3.3V
-CH340G GND → GND
+Type-C VBUS (5V) ──→ CH340C VCC
+                   ├── 74HCT04 VCC
+                   ├── 扩展排针 5V
+                   └── Blue Pill 5V pin → 板载 AMS1117-3.3 → MCU + OLED + 编码器
+
+Type-C D+ ──→ CH340C UD+ (10kΩ 上拉到 3.3V，用于 USB 全速识别)
+Type-C D- ──→ CH340C UD-
+Type-C GND ──→ 共地
 ```
+
+### CH340C 连接
+```
+CH340C TXD ──→ PA10 (USART1 RX)
+CH340C RXD ──→ PA9  (USART1 TX)
+CH340C VCC ──→ 5V (Type-C VBUS)
+CH340C GND ──→ GND
+
+CH340C 时钟: 可选外挂 12MHz 晶振 + 22pF×2 (C 版内置 RC 振荡，推荐外挂确保稳定性)
+CH340C 去耦: VCC 引脚旁 100nF 电容
+```
+
+### 元件清单
+| 元件 | 数量 | 说明 |
+|------|------|------|
+| CH340C (SOP-16) | 1 | USB 转串口芯片 |
+| Type-C 16P 沉板母座 | 1 | USB 连接器 |
+| 12MHz 晶振 | 1 | CH340C 时钟源 |
+| 22pF 电容 | 2 | 晶振负载电容 |
+| 100nF 电容 | 1 | CH340C 去耦 |
+| 10kΩ 电阻 | 1 | D+ 上拉 |
+
+## 扩展排针 (底部 2×7 双排母座)
+
+PCB 底部边缘设 2.54mm 间距双排排针座（母座，向下开口），扩展板从下方插入。引出 STM32 未使用的 GPIO 引脚 + 5V 电源 + GND。
+
+### 引脚定义
+
+| 排针号 | STM32 引脚 | 默认功能 | 备注 |
+|--------|-----------|---------|------|
+| 1 | PA3 | GPIO | TIM2_CH4, USART2_RX |
+| 2 | PA4 | GPIO | SPI1_NSS, DAC1 |
+| 3 | PA5 | GPIO | SPI1_SCK, DAC2 |
+| 4 | PB0 | GPIO | TIM3_CH3, ADC8 |
+| 5 | PB1 | GPIO | TIM3_CH4, ADC9 |
+| 6 | PB5 | GPIO | SPI1_MOSI, I2C1_SMBA |
+| 7 | PB7 | GPIO | I2C1_SDA, TIM4_CH2 |
+| 8 | PB9 | GPIO | I2C1_SDA, CAN_TX |
+| 9 | PB10 | GPIO | I2C1_SCL, USART3_TX |
+| 10 | PB11 | GPIO | USART3_RX, CAN_RX |
+| 11 | PB12 | GPIO | SPI1_NSS, USART3_CK |
+| 12 | 5V | 电源 | Type-C VBUS 直供 |
+| 13 | GND | 地 | 共地 |
+| 14 | GND | 地 | 双地脚确保接触 |
+
+### 排针排列
+
+```
+主控板 PCB (元件面朝上):
+
+  ┌──────────────────────────────────────┐
+  │                                      │
+  │          BNC1  BNC2  BNC3            │  ← 顶部: BNC 接口
+  │          [PWM] [PWM] [FG ]           │
+  │                                      │
+  │    [OLED]    [旋钮]    [Type-C]      │  ← 中部: 显示/操作/USB
+  │                                      │
+  └──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┘
+     1  2  3  4  5  6  7  8  9  10 11 12 13 14
+    PA3 PA4 PA5 PB0 PB1 PB5 PB7 PB9 10 11 12 5V GND GND
+                                                  ← 底部: 扩展排针
+```
+
+### 引脚资源汇总
+
+| 分类 | 引脚 | 数量 |
+|------|------|------|
+| 已使用 (功能) | PA0, PA1, PA2, PA6, PA7, PA8, PA9, PA10, PB6, PB8 | 10 |
+| SWD 调试 (保留) | PA13, PA14 | 2 |
+| 扩展排针引出 | PA3, PA4, PA5, PB0, PB1, PB5, PB7, PB9, PB10, PB11, PB12 | 11 |
+| 电源引出 | 5V, GND×2 | 3 |
+| 未引出 | PA11, PA12 (USB D+/D-), PA15/PB3/PB4 (JTAG) | 5 |
 
 ## 整体连接框图
 
 ```
-                    ┌─────────────────────────┐
-    EC11 ───────────┤ PA6/PA7 (TIM3) + PB8   │
-    OLED ───────────┤ PA1/PA2 (软件I2C)        │
-                    │                         │
-                    │    STM32F103C8T6        │
-                    │                         │
-    FG IN ──[分压]──┤ PA0 (TIM2 CH1)          │
-                    │                         │
-                    │ PA8 (TIM1 CH1) ──[74HCT04]── PWM OUT1 (5V)
-                    │ PB6 (TIM4 CH1) ──[74HCT04]── PWM OUT2 (5V)
-                    │                         │
-    USB-TTL ────────┤ PA9/PA10 (USART1)       │
-                    └─────────────────────────┘
+                         ┌──────────────────────────────┐
+     EC11 ───────────────┤ PA6/PA7 (TIM3) + PB8        │
+     OLED ───────────────┤ PA1/PA2 (软件I2C)             │
+                         │                              │
+     Type-C ──[CH340C]──┤ PA9/PA10 (USART1)            │
+                         │                              │
+                         │     STM32F103C8T6            │
+                         │                              │
+     FG IN ──[分压]──────┤ PA0 (TIM2 CH1)               │
+                         │                              │
+                         │ PA8 (TIM1 CH1)─[74HCT04]─PWM OUT1 (5V BNC)
+                         │ PB6 (TIM4 CH1)─[74HCT04]─PWM OUT2 (5V BNC)
+                         │                              │
+     扩展排针 ◄──────────┤ PA3/4/5, PB0/1/5/7/9/10/11/12
+                         │         + 5V + GND           │
+                         └──────────────────────────────┘
 ```

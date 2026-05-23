@@ -55,7 +55,7 @@ EVENT_NONE, EVENT_CW, EVENT_CCW, EVENT_CLICK, EVENT_LONG_PRESS, EVENT_DOUBLE_CLI
 # ── Modes ──
 MODE_PWM_FG, MODE_FG, MODE_CH1, MODE_CH2, MODE_TEST = range(5)
 NUM_MODES = 5
-MODE_NAMES = ["PWM-FG", "FG MODE", "CH1 PWM", "CH2 PWM", "TEST MODE"]
+MODE_NAMES = ["PWM-FG", "FG模式", "CH1", "CH2", "测试模式"]
 
 # ── Items ──
 ITEM_CH1_FREQ, ITEM_CH1_DUTY, ITEM_CH2_FREQ, ITEM_CH2_DUTY, ITEM_FG_DIV = range(5)
@@ -953,7 +953,7 @@ APP_STYLE = """
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PWM Signal Generator Simulator")
+        self.setWindowTitle("PWM 信号发生器仿真器")
         self.setFixedSize(600, 900)
         self.eng = Engine()
         self.serial = SerialComm()
@@ -965,7 +965,7 @@ class MainWindow(QMainWindow):
         root.setSpacing(10)
 
         # ── Title ──
-        title = QLabel("PWM TOOL")
+        title = QLabel("PWM 信号发生器")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("color:#2a3050; font-size:18px; font-weight:bold; letter-spacing:4px;")
         root.addWidget(title)
@@ -999,7 +999,7 @@ class MainWindow(QMainWindow):
         """)
         serial_row.addWidget(self.port_combo)
 
-        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn = QPushButton("刷新")
         self.refresh_btn.setFixedWidth(72)
         self.refresh_btn.setStyleSheet("""
             QPushButton { color:#505870; font-size:11px; background:#fff;
@@ -1009,7 +1009,7 @@ class MainWindow(QMainWindow):
         self.refresh_btn.clicked.connect(self._refresh_ports)
         serial_row.addWidget(self.refresh_btn)
 
-        self.connect_btn = QPushButton("Connect")
+        self.connect_btn = QPushButton("连接")
         self.connect_btn.setFixedWidth(90)
         self.connect_btn.setStyleSheet("""
             QPushButton { color:#fff; font-size:11px; font-weight:bold;
@@ -1020,7 +1020,7 @@ class MainWindow(QMainWindow):
         self.connect_btn.clicked.connect(self._toggle_connect)
         serial_row.addWidget(self.connect_btn)
 
-        self.serial_status = QLabel("Not connected")
+        self.serial_status = QLabel("未连接")
         self.serial_status.setStyleSheet("color:#998888; font-size:10px;")
         serial_row.addWidget(self.serial_status)
         serial_row.addStretch()
@@ -1028,7 +1028,7 @@ class MainWindow(QMainWindow):
         root.addLayout(serial_row)
 
         # ── State label ──
-        self.state_lbl = QLabel("CH1 DUTY")
+        self.state_lbl = QLabel("CH1 占空比")
         self.state_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.state_lbl.setStyleSheet("""
             color:#4a60a0; font-size:14px; font-weight:bold;
@@ -1076,7 +1076,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self.test_lbl)
 
         # ── Encoder ──
-        el = QLabel("ENCODER")
+        el = QLabel("旋钮编码器")
         el.setAlignment(Qt.AlignmentFlag.AlignCenter)
         el.setStyleSheet("color:#8090a0; font-size:11px; letter-spacing:2px;")
         root.addWidget(el)
@@ -1086,7 +1086,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self.encoder, 0, Qt.AlignmentFlag.AlignCenter)
 
         # ── Help panel (collapsible) ──
-        self.help_group = QGroupBox("  使用说明 / Instructions  ▼")
+        self.help_group = QGroupBox("  使用说明 ▼")
         self.help_group.setCheckable(True)
         self.help_group.setChecked(False)
         self.help_group.setStyleSheet("""
@@ -1106,7 +1106,7 @@ class MainWindow(QMainWindow):
         help_text = QLabel(
             "【操作】旋转旋钮调参  |  点击OK启停通道  |  长按OK选择项目  |  双击OK切换模式\n"
             "【模式】PWM-FG:双通道输出  FG:频率计  CH1/CH2:单通道调节  TEST:自动测试循环\n"
-            "【串口】选择COM口 → Connect连接硬件，参数自动同步，TEST数据可导出CSV"
+            "【串口】选择COM口 → 点击「连接」，参数自动同步，测试数据可导出CSV"
         )
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color:#606878; font-size:10px; font-weight:normal; line-height:1.4;")
@@ -1114,7 +1114,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self.help_group)
 
         # ── Tip ──
-        tip = QLabel("OK toggle  |  Long-press select  |  Double-click mode")
+        tip = QLabel("单击=启停 | 长按=选择 | 双击=切模式")
         tip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         tip.setStyleSheet("color:#a0a4b0; font-size:10px; letter-spacing:1px;")
         root.addWidget(tip)
@@ -1134,7 +1134,7 @@ class MainWindow(QMainWindow):
         if HAS_SERIAL:
             self._refresh_ports()
         else:
-            self.port_combo.addItem("pyserial not installed")
+            self.port_combo.addItem("未安装pyserial")
             self.connect_btn.setEnabled(False)
 
         self._refresh()
@@ -1145,32 +1145,32 @@ class MainWindow(QMainWindow):
         for dev, desc in ports:
             self.port_combo.addItem(f"{dev}  —  {desc}", dev)
         if not ports:
-            self.port_combo.addItem("No ports found")
+            self.port_combo.addItem("未找到串口")
 
     def _toggle_connect(self):
         if self.serial.connected:
             self.serial.disconnect()
-            self.connect_btn.setText("Connect")
+            self.connect_btn.setText("连接")
             self.connect_btn.setStyleSheet("""
                 QPushButton { color:#fff; font-size:11px; font-weight:bold;
                               background:#0070bc; border:none; border-radius:6px; padding:5px 12px; }
                 QPushButton:hover { background:#0088dd; }
             """)
-            self.serial_status.setText("Disconnected")
+            self.serial_status.setText("已断开")
             self.serial_status.setStyleSheet("color:#998888; font-size:10px;")
         else:
             dev = self.port_combo.currentData()
             if dev and self.serial.connect(dev):
-                self.connect_btn.setText("Disconnect")
+                self.connect_btn.setText("断开")
                 self.connect_btn.setStyleSheet("""
                     QPushButton { color:#fff; font-size:11px; font-weight:bold;
                                   background:#cc4444; border:none; border-radius:6px; padding:5px 12px; }
                     QPushButton:hover { background:#dd5555; }
                 """)
-                self.serial_status.setText(f"Connected {dev}")
+                self.serial_status.setText(f"已连接 {dev}")
                 self.serial_status.setStyleSheet("color:#008844; font-size:10px;")
             else:
-                self.serial_status.setText("Connect failed!")
+                self.serial_status.setText("连接失败！")
                 self.serial_status.setStyleSheet("color:#cc4444; font-size:10px;")
 
     def _request_status(self):
@@ -1214,13 +1214,13 @@ class MainWindow(QMainWindow):
         if not self.eng.export_csv_lines:
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Test Data", "test_data.csv", "CSV Files (*.csv)")
+            self, "保存测试数据", "test_data.csv", "CSV文件 (*.csv)")
         if path:
             try:
                 with open(path, 'w', newline='') as f:
                     for line in self.eng.export_csv_lines:
                         f.write(line)
-                self.test_lbl.setText(f"Exported {len(self.eng.export_csv_lines)} lines")
+                self.test_lbl.setText(f"已导出 {len(self.eng.export_csv_lines)} 行")
                 self.test_lbl.setStyleSheet("""
                     color:#008844; font-size:12px; font-weight:bold;
                     background:#e8f8f0; border:1px solid #b0e8cc;
@@ -1229,7 +1229,7 @@ class MainWindow(QMainWindow):
                 """)
                 self.test_lbl.setVisible(True)
             except Exception as e:
-                self.test_lbl.setText(f"Export failed: {e}")
+                self.test_lbl.setText(f"导出失败：{e}")
         self.eng.export_csv_lines = []
 
     def _on(self, ev):
@@ -1283,32 +1283,32 @@ class MainWindow(QMainWindow):
         mode = self.eng.mode
         if mode == MODE_TEST:
             if self.eng.test_running:
-                lbl = f"TEST RUNNING  Cycle {self.eng.test_current_cycle}/{self.eng.test_cycles}"
+                lbl = f"测试运行中  第{self.eng.test_current_cycle}/{self.eng.test_cycles}轮"
             else:
-                names = {0: "CH", 1: "FREQ", 2: "DUTY", 3: "CYCLES",
-                         4: "ON TIME", 5: "OFF TIME", 6: "START"}
-                lbl = f"TEST: {names.get(self.eng.cursor, '')}"
+                names = {0: "通道", 1: "频率", 2: "占空比", 3: "循环数",
+                         4: "ON时间", 5: "OFF时间", 6: "开始"}
+                lbl = f"测试: {names.get(self.eng.cursor, '')}"
                 if self.eng.selected:
-                    lbl += "  [SELECT]"
+                    lbl += "  [选择]"
         elif mode == MODE_FG:
-            lbl = "FG DIV"
+            lbl = "FG分频"
             if self.eng.selected:
-                lbl += "  [SELECT]"
+                lbl += "  [选择]"
         elif mode == MODE_CH1:
-            names = {0: "CH1 FREQ", 1: "CH1 DUTY", 2: "CH1 EN"}
+            names = {0: "CH1频率", 1: "CH1占空比", 2: "CH1使能"}
             lbl = names.get(self.eng.cursor, "")
             if self.eng.selected:
-                lbl += "  [SELECT]"
+                lbl += "  [选择]"
         elif mode == MODE_CH2:
-            names = {0: "CH2 FREQ", 1: "CH2 DUTY", 2: "CH2 EN"}
+            names = {0: "CH2频率", 1: "CH2占空比", 2: "CH2使能"}
             lbl = names.get(self.eng.cursor, "")
             if self.eng.selected:
-                lbl += "  [SELECT]"
+                lbl += "  [选择]"
         else:
-            names = {0: "CH1 FREQ", 1: "CH1 DUTY", 2: "CH2 FREQ", 3: "CH2 DUTY", 4: "FG DIV"}
+            names = {0: "CH1频率", 1: "CH1占空比", 2: "CH2频率", 3: "CH2占空比", 4: "FG分频"}
             lbl = names.get(self.eng.cursor, "")
             if self.eng.selected:
-                lbl += "  [SELECT]"
+                lbl += "  [选择]"
         self.state_lbl.setText(lbl)
 
         # Channel cards
@@ -1328,7 +1328,7 @@ class MainWindow(QMainWindow):
 
         # Test status bar
         if self.eng.test_running:
-            self.test_lbl.setText(f"TEST RUNNING  CH{self.eng.test_channel}  Cycle {self.eng.test_current_cycle}/{self.eng.test_cycles}")
+            self.test_lbl.setText(f"测试运行中  CH{self.eng.test_channel}  第{self.eng.test_current_cycle}/{self.eng.test_cycles}轮")
             self.test_lbl.setStyleSheet("""
                 color:#cc6600; font-size:12px; font-weight:bold;
                 background:#fff8f0; border:1px solid #f0d8a0;
@@ -1337,7 +1337,7 @@ class MainWindow(QMainWindow):
             """)
             self.test_lbl.setVisible(True)
         elif mode == MODE_TEST:
-            self.test_lbl.setText(f"Test ready  Records: {self.eng.test_record_count}")
+            self.test_lbl.setText(f"测试就绪  记录: {self.eng.test_record_count}")
             self.test_lbl.setStyleSheet("""
                 color:#4a60a0; font-size:12px; font-weight:bold;
                 background:#f0f4ff; border:1px solid #c0d0e8;
