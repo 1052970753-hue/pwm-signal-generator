@@ -191,19 +191,48 @@ python simulator/run_simulator.py
 
 ## 通信协议
 
-PC 与 MCU 之间通过 USB CDC (115200 baud) 通信：
+PC 与 MCU 之间通过 USB CDC (USART1, 115200 baud) 双向通信。
+
+### 帧格式
 
 ```
-帧格式: [Header 1B] [CMD 1B] [LEN 1B] [DATA NB] [CRC8 1B]
+| Header (1B) | CMD (1B) | LEN (1B) | DATA (NB) | CRC8 (1B) |
 
 Header: 0xAA (PC→MCU) / 0xBB (MCU→PC)
-CMD:
-  0x10  读取状态 (MCU→PC, 18字节 StatusData)
-  0x20  写入PWM参数 (PC→MCU)
-  0x30  写入FG分频比 (PC→MCU)
-  0x40  OLED缓冲区传输 (1024字节)
-  0x41  按键事件转发 (PC→MCU)
+CRC8: 多项式 0x07, 对 HEADER+CMD+LEN+DATA 计算
 ```
+
+### 命令列表
+
+| CMD | 方向 | DATA 结构 | 说明 |
+|-----|------|----------|------|
+| `0x10` | MCU→PC | `StatusData` (18B) | 查询/上报状态：CH1/CH2 频率、占空比、使能、FG频率、分频、RPM |
+| `0x20` | PC→MCU | `PwmWriteReq` (7B) | 写入PWM参数：channel(1/2) + freq_hz + duty_pct + enable |
+| `0x30` | PC→MCU | `FgDivReq` (1B) | 写入FG分频比：div(1/2/4/8) |
+| `0x41` | PC→MCU | `KeyEventReq` (1B) | 远程按键事件：0=None, 1=CW, 2=CCW, 3=Click, 4=LongPress |
+
+### 通信流程
+
+```
+PC ──[0xAA 0x10 0x00 CRC]──→ MCU    # 查询状态
+PC ←──[0xBB 0x10 12 DATA CRC]── MCU  # 返回 StatusData
+
+PC ──[0xAA 0x20 0x07 DATA CRC]──→ MCU  # 设置 PWM
+PC ←──[0xBB 0x20 0x00 CRC]── MCU       # ACK
+
+PC ──[0xAA 0x41 0x01 0x03 CRC]──→ MCU  # 发送 Click 事件
+PC ←──[0xBB 0x41 0x00 CRC]── MCU       # ACK
+```
+
+### 远程按键事件映射
+
+| 事件值 | 含义 | 效果 |
+|--------|------|------|
+| 0 | EVENT_NONE | 无操作 |
+| 1 | EVENT_CW | 旋钮顺时针（正常模式=增加值，选择模式=下移光标） |
+| 2 | EVENT_CCW | 旋钮逆时针（正常模式=减少值，选择模式=上移光标） |
+| 3 | EVENT_CLICK | 短按OK（正常模式=切换通道，选择模式=退出选择） |
+| 4 | EVENT_LONG_PRESS | 长按OK（进入选择模式） |
 
 ---
 
