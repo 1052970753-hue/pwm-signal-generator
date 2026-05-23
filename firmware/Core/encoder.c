@@ -4,6 +4,10 @@
 static int16_t enc_last = 0;
 static uint32_t btn_press_ticks = 0;
 static uint8_t btn_ok_prev = 1;
+static uint32_t sys_tick = 0;
+static uint32_t last_click_tick = 0;
+
+#define DOUBLE_CLICK_MS 400
 
 void Encoder_Init(void) {
     RCC_APB1PeriphClockCmd(ENC_TIM_CLK, ENABLE);
@@ -41,6 +45,10 @@ void Encoder_Init(void) {
     TIM_Cmd(ENC_TIM, ENABLE);
 }
 
+void Encoder_SetTick(uint32_t tick) {
+    sys_tick = tick;
+}
+
 InputEvent Encoder_Poll(void) {
     int16_t now = TIM_GetCounter(ENC_TIM);
     int16_t delta = (int16_t)(now - enc_last);
@@ -70,6 +78,12 @@ InputEvent Encoder_Poll(void) {
         btn_ok_prev = 1;
         if (btn_press_ticks > 0 && btn_press_ticks < 1000) {
             btn_press_ticks = 0;
+            // Double-click detection
+            if (sys_tick - last_click_tick < DOUBLE_CLICK_MS) {
+                last_click_tick = 0;
+                return EVENT_DOUBLE_CLICK;
+            }
+            last_click_tick = sys_tick;
             return EVENT_CLICK;
         }
         btn_press_ticks = 0;

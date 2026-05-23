@@ -6,6 +6,7 @@
 
 void Protocol_Init(void);
 void Protocol_SendStatus(StatusData *status);
-void Protocol_Process(void);  // Call in main loop to handle incoming frames
+void Protocol_Process(void);        // Call in main loop to handle incoming frames
+void Protocol_ProcessExport(void);  // Continue CSV export in main loop
 
 #endif

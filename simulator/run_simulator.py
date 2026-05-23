@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""PWM Signal Generator — Simulator (PyQt6) with Serial Communication"""
-import sys, math, struct
+"""PWM Signal Generator — Simulator (PyQt6) with Multi-Mode & Test Support"""
+import sys, math, struct, os, time
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QLabel, QFrame, QComboBox, QPushButton
+    QLabel, QFrame, QComboBox, QPushButton, QFileDialog
 )
 from PyQt6.QtGui import QPainter, QColor, QImage, QFont, QPen, QBrush
 from PyQt6.QtCore import Qt, QPoint, QRect, QTimer
@@ -19,15 +19,21 @@ except ImportError:
 OLED_W, OLED_H = 128, 64
 SCALE = 4
 
-# ── Protocol constants (match firmware) ──
+# ── Protocol constants ──
 FRAME_HEADER_PC2MCU = 0xAA
 FRAME_HEADER_MCU2PC = 0xBB
-CMD_READ_STATUS  = 0x10
-CMD_WRITE_PWM    = 0x20
-CMD_WRITE_FG_DIV = 0x30
-CMD_KEY_EVENT    = 0x41
+CMD_READ_STATUS   = 0x10
+CMD_WRITE_PWM     = 0x20
+CMD_WRITE_FG_DIV  = 0x30
+CMD_KEY_EVENT     = 0x41
+CMD_SET_TEST      = 0x42
+CMD_START_TEST    = 0x43
+CMD_STOP_TEST     = 0x44
+CMD_EXPORT_DATA   = 0x50
+CMD_EXPORT_CHUNK  = 0x51
+CMD_EXPORT_DONE   = 0x52
 
-# ── CRC8 (polynomial 0x07, match firmware) ──
+# ── CRC8 ──
 def crc8(data: bytes) -> int:
     crc = 0x00
     for b in data:
@@ -44,19 +50,28 @@ def build_frame(cmd: int, data: bytes = b'') -> bytes:
     return header + bytes([crc8(header)])
 
 # ── Events ──
-EVENT_NONE, EVENT_CW, EVENT_CCW, EVENT_CLICK, EVENT_LONG_PRESS, EVENT_BACK = range(6)
+EVENT_NONE, EVENT_CW, EVENT_CCW, EVENT_CLICK, EVENT_LONG_PRESS, EVENT_DOUBLE_CLICK = range(6)
 
-# ── Items (cursor cycles Freq/Duty/FG div) ──
-ITEM_CH1_FREQ, ITEM_CH1_DUTY = 0, 1
-ITEM_CH2_FREQ, ITEM_CH2_DUTY = 2, 3
-ITEM_FG_DIV = 4
+# ── Modes ──
+MODE_PWM_FG, MODE_FG, MODE_CH1, MODE_CH2, MODE_TEST = range(5)
+NUM_MODES = 5
+MODE_NAMES = ["PWM-FG", "FG MODE", "CH1 PWM", "CH2 PWM", "TEST MODE"]
+
+# ── Items ──
+ITEM_CH1_FREQ, ITEM_CH1_DUTY, ITEM_CH2_FREQ, ITEM_CH2_DUTY, ITEM_FG_DIV = range(5)
 NUM_ITEMS = 5
+
+# Test items
+TEST_ITEM_CHANNEL, TEST_ITEM_FREQ, TEST_ITEM_DUTY, TEST_ITEM_CYCLES = 0, 1, 2, 3
+TEST_ITEM_ON_TIME, TEST_ITEM_OFF_TIME, TEST_ITEM_START = 4, 5, 6
+NUM_TEST_ITEMS = 7
 
 
 class Engine:
-    """Two modes: normal (encoder changes value) and select (long-press OK, encoder moves cursor)."""
+    """Multi-mode engine with test support."""
 
     def __init__(self):
+        # PWM params
         self.ch1_freq = 1000
         self.ch1_duty = 50
         self.ch1_on = False
@@ -65,57 +80,165 @@ class Engine:
         self.ch2_on = False
         self.fg_div = 2
         self.fg_rpm = 0
+
+        # Mode & navigation
+        self.mode = MODE_PWM_FG
         self.cursor = 1
         self.selected = False
 
-    def _get(self):
-        return [self.ch1_freq, self.ch1_duty,
-                self.ch2_freq, self.ch2_duty,
-                self.fg_div][self.cursor]
+        # Test config
+        self.test_channel = 1
+        self.test_freq = 1000
+        self.test_duty = 50
+        self.test_cycles = 10
+        self.test_on_sec = 5
+        self.test_off_sec = 3
+        self.test_running = False
+        self.test_record_count = 0
+        self.test_current_cycle = 0
 
-    def _set(self, v):
-        if self.cursor == ITEM_CH1_FREQ:
-            self.ch1_freq = max(1, min(100000, v))
-        elif self.cursor == ITEM_CH1_DUTY:
-            self.ch1_duty = max(0, min(100, v))
-        elif self.cursor == ITEM_CH2_FREQ:
-            self.ch2_freq = max(1, min(100000, v))
-        elif self.cursor == ITEM_CH2_DUTY:
-            self.ch2_duty = max(0, min(100, v))
-        elif self.cursor == ITEM_FG_DIV:
+        # Export
+        self.export_csv_lines = []
+        self.export_active = False
+
+    def _get_max_items(self):
+        if self.mode == MODE_TEST:
+            return NUM_TEST_ITEMS
+        elif self.mode == MODE_PWM_FG:
+            return NUM_ITEMS
+        else:
+            return 3  # Freq, Duty, Enable
+
+    # ── Value get/set per mode ──
+
+    def _get_value(self):
+        if self.mode == MODE_PWM_FG:
+            return [self.ch1_freq, self.ch1_duty,
+                    self.ch2_freq, self.ch2_duty,
+                    self.fg_div][self.cursor]
+        elif self.mode == MODE_CH1:
+            return [self.ch1_freq, self.ch1_duty, 0][self.cursor]
+        elif self.mode == MODE_CH2:
+            return [self.ch2_freq, self.ch2_duty, 0][self.cursor]
+        elif self.mode == MODE_FG:
+            return self.fg_div
+        return 0
+
+    def _set_value(self, v):
+        if self.mode == MODE_PWM_FG:
+            limits = [(1, 100000), (0, 100), (1, 100000), (0, 100), (1, 99)]
+            lo, hi = limits[self.cursor]
+            v = max(lo, min(hi, v))
+            if self.cursor == ITEM_CH1_FREQ: self.ch1_freq = v
+            elif self.cursor == ITEM_CH1_DUTY: self.ch1_duty = v
+            elif self.cursor == ITEM_CH2_FREQ: self.ch2_freq = v
+            elif self.cursor == ITEM_CH2_DUTY: self.ch2_duty = v
+            elif self.cursor == ITEM_FG_DIV: self.fg_div = v
+        elif self.mode == MODE_CH1:
+            if self.cursor == 0: self.ch1_freq = max(1, min(100000, v))
+            elif self.cursor == 1: self.ch1_duty = max(0, min(100, v))
+        elif self.mode == MODE_CH2:
+            if self.cursor == 0: self.ch2_freq = max(1, min(100000, v))
+            elif self.cursor == 1: self.ch2_duty = max(0, min(100, v))
+        elif self.mode == MODE_FG:
             self.fg_div = max(1, min(99, v))
+
+    def _get_test_value(self):
+        return [self.test_channel, self.test_freq, self.test_duty,
+                self.test_cycles, self.test_on_sec, self.test_off_sec, 0][self.cursor]
+
+    def _set_test_value(self, delta):
+        if self.cursor == TEST_ITEM_CHANNEL:
+            self.test_channel = 2 if self.test_channel == 1 else 1
+        elif self.cursor == TEST_ITEM_FREQ:
+            self.test_freq = max(1, min(100000, self.test_freq + delta))
+        elif self.cursor == TEST_ITEM_DUTY:
+            self.test_duty = max(0, min(100, self.test_duty + delta))
+        elif self.cursor == TEST_ITEM_CYCLES:
+            self.test_cycles = max(1, min(999, self.test_cycles + delta))
+        elif self.cursor == TEST_ITEM_ON_TIME:
+            self.test_on_sec = max(1, min(60, self.test_on_sec + delta))
+        elif self.cursor == TEST_ITEM_OFF_TIME:
+            self.test_off_sec = max(1, min(60, self.test_off_sec + delta))
 
     def process(self, ev):
         if ev == EVENT_NONE:
             return
+
+        # Double-click: switch mode (always active)
+        if ev == EVENT_DOUBLE_CLICK:
+            self.mode = (self.mode + 1) % NUM_MODES
+            self.cursor = 0
+            self.selected = False
+            return
+
+        # Test running: only click stops
+        if self.mode == MODE_TEST and self.test_running:
+            if ev == EVENT_CLICK:
+                self.test_running = False
+            return
+
+        # Select mode: encoder moves cursor
         if self.selected:
+            mi = self._get_max_items()
             if ev == EVENT_CW:
-                self.cursor = (self.cursor + 1) % NUM_ITEMS
+                self.cursor = (self.cursor + 1) % mi
             elif ev == EVENT_CCW:
-                self.cursor = (self.cursor - 1) % NUM_ITEMS
+                self.cursor = (self.cursor - 1) % mi
             elif ev == EVENT_CLICK:
                 self.selected = False
-            elif ev == EVENT_BACK:
-                self.selected = False
             return
-        if ev == EVENT_CW:
-            self._set(self._get() + 1)
-        elif ev == EVENT_CCW:
-            self._set(self._get() - 1)
-        elif ev == EVENT_LONG_PRESS:
-            self.selected = True
-        elif ev == EVENT_CLICK:
-            if self.cursor <= ITEM_CH1_DUTY:
-                self.ch1_on = not self.ch1_on
-            elif self.cursor <= ITEM_CH2_DUTY:
-                self.ch2_on = not self.ch2_on
+
+        # Normal mode
+        if self.mode == MODE_TEST:
+            if ev == EVENT_CW:
+                self._set_test_value(1)
+            elif ev == EVENT_CCW:
+                self._set_test_value(-1)
+            elif ev == EVENT_CLICK:
+                if self.cursor == TEST_ITEM_START:
+                    self.test_running = True
+                    self.test_record_count = 0
+                    self.test_current_cycle = 0
+            elif ev == EVENT_LONG_PRESS:
+                self.selected = True
+        elif self.mode == MODE_PWM_FG:
+            if ev == EVENT_CW:
+                self._set_value(self._get_value() + 1)
+            elif ev == EVENT_CCW:
+                self._set_value(self._get_value() - 1)
+            elif ev == EVENT_CLICK:
+                if self.cursor <= ITEM_CH1_DUTY:
+                    self.ch1_on = not self.ch1_on
+                elif self.cursor <= ITEM_CH2_DUTY:
+                    self.ch2_on = not self.ch2_on
+            elif ev == EVENT_LONG_PRESS:
+                self.selected = True
+        elif self.mode == MODE_FG:
+            if ev == EVENT_CW:
+                self.fg_div = min(99, self.fg_div + 1)
+            elif ev == EVENT_CCW:
+                self.fg_div = max(1, self.fg_div - 1)
+            elif ev == EVENT_LONG_PRESS:
+                self.selected = True
+        elif self.mode in (MODE_CH1, MODE_CH2):
+            ch = 1 if self.mode == MODE_CH1 else 2
+            if ev == EVENT_CW:
+                self._set_value(self._get_value() + 1)
+            elif ev == EVENT_CCW:
+                self._set_value(self._get_value() - 1)
+            elif ev == EVENT_CLICK:
+                if ch == 1:
+                    self.ch1_on = not self.ch1_on
+                else:
+                    self.ch2_on = not self.ch2_on
+            elif ev == EVENT_LONG_PRESS:
+                self.selected = True
 
 
 # ── Serial communication ──
 
 class SerialComm:
-    """Manages serial connection and protocol with STM32 hardware."""
-
     def __init__(self):
         self.ser = None
         self.connected = False
@@ -145,28 +268,33 @@ class SerialComm:
         self.connected = False
         self.ser = None
 
+    def _send(self, frame):
+        if self.connected and self.ser:
+            try:
+                self.ser.write(frame)
+            except Exception:
+                self.disconnect()
+
     def send_key_event(self, event_code):
-        if not self.connected:
-            return
-        data = struct.pack('B', event_code)
-        self.ser.write(build_frame(CMD_KEY_EVENT, data))
+        self._send(build_frame(CMD_KEY_EVENT, struct.pack('B', event_code)))
 
     def send_write_pwm(self, channel, freq, duty, enable):
-        if not self.connected:
-            return
-        data = struct.pack('<BIBB', channel, freq, duty, enable)
-        self.ser.write(build_frame(CMD_WRITE_PWM, data))
+        self._send(build_frame(CMD_WRITE_PWM, struct.pack('<BIBB', channel, freq, duty, enable)))
 
     def send_write_fg_div(self, div):
-        if not self.connected:
-            return
-        data = struct.pack('B', div)
-        self.ser.write(build_frame(CMD_WRITE_FG_DIV, data))
+        self._send(build_frame(CMD_WRITE_FG_DIV, struct.pack('B', div)))
 
     def send_read_status(self):
-        if not self.connected:
-            return
-        self.ser.write(build_frame(CMD_READ_STATUS))
+        self._send(build_frame(CMD_READ_STATUS))
+
+    def send_start_test(self):
+        self._send(build_frame(CMD_START_TEST))
+
+    def send_stop_test(self):
+        self._send(build_frame(CMD_STOP_TEST))
+
+    def send_export_data(self):
+        self._send(build_frame(CMD_EXPORT_DATA))
 
     def poll(self):
         """Read available bytes, parse frames, return (cmd, data) or None."""
@@ -180,53 +308,48 @@ class SerialComm:
             self.disconnect()
             return None
 
-        # Try to parse a complete frame
         while len(self._rx_buf) >= 5:
-            # Find header
             if self._rx_buf[0] != FRAME_HEADER_MCU2PC:
                 self._rx_buf.pop(0)
                 continue
-
             cmd = self._rx_buf[1]
             length = self._rx_buf[2]
-            total = 3 + length + 1  # header+cmd+len + data + crc
-
+            total = 3 + length + 1
             if len(self._rx_buf) < total:
-                break  # incomplete, wait for more
-
+                break
             frame = bytes(self._rx_buf[:total])
-            # Verify CRC
             calc_crc = crc8(frame[:-1])
             if calc_crc == frame[-1]:
                 data = frame[3:3 + length]
                 self._rx_buf = self._rx_buf[total:]
                 return (cmd, data)
             else:
-                # CRC mismatch, skip this header byte
                 self._rx_buf.pop(0)
-
         return None
 
     def read_status_data(self, data):
-        """Parse StatusData from frame data (18 bytes)."""
-        if len(data) < 18:
+        """Parse StatusData from frame data (25 bytes)."""
+        if len(data) < 25:
             return None
         return {
-            'ch1_freq':   struct.unpack_from('<I', data, 0)[0],
-            'ch1_duty':   data[4],
-            'ch1_on':     bool(data[5]),
-            'ch2_freq':   struct.unpack_from('<I', data, 6)[0],
-            'ch2_duty':   data[10],
-            'ch2_on':     bool(data[11]),
-            'fg_freq_mhz':struct.unpack_from('<I', data, 12)[0],
-            'fg_div':     data[16],
-            'rpm':        struct.unpack_from('<H', data, 17)[0],
+            'ch1_freq':    struct.unpack_from('<I', data, 0)[0],
+            'ch1_duty':    data[4],
+            'ch1_on':      bool(data[5]),
+            'ch2_freq':    struct.unpack_from('<I', data, 6)[0],
+            'ch2_duty':    data[10],
+            'ch2_on':      bool(data[11]),
+            'fg_freq_mhz': struct.unpack_from('<I', data, 12)[0],
+            'fg_div':      data[16],
+            'rpm':         struct.unpack_from('<H', data, 17)[0],
+            'mode':        data[19],
+            'test_state':  data[20],
+            'test_cycle':  struct.unpack_from('<H', data, 21)[0],
+            'test_total':  struct.unpack_from('<H', data, 23)[0],
         }
 
 
-# ── OLED drawing helpers ──
+# ── OLED drawing ──
 
-# Bold pixel font — 5x7, thicker strokes, industrial instrument style
 FONT = [
     0x00, 0x00, 0x00, 0x00, 0x00,  0x00, 0x17, 0x17, 0x00, 0x00,
     0x03, 0x03, 0x00, 0x03, 0x03,  0x14, 0x7F, 0x14, 0x7F, 0x14,
@@ -289,6 +412,10 @@ FONT = [
 
 
 class OLEDWidget(QWidget):
+    # 分子重组动画参数
+    MOL_FRAMES = 12       # 动画总帧数
+    MOL_INTERVAL = 40     # 每帧间隔 (ms)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.buf = QImage(OLED_W, OLED_H, QImage.Format.Format_Mono)
@@ -299,11 +426,108 @@ class OLEDWidget(QWidget):
         self._blink_timer = QTimer(self)
         self._blink_timer.timeout.connect(self._toggle_blink)
         self._blink_timer.start(400)
+        # 分子重组动画状态
+        self._prev_mode = None           # 上次渲染的模式
+        self._mol_active = False         # 动画是否进行中
+        self._mol_old = []               # 旧帧像素 [(x,y), ...]
+        self._mol_new = []               # 新帧目标像素 [(x,y), ...]
+        self._mol_frame = 0              # 当前帧号
+        self._mol_timer = QTimer(self)
+        self._mol_timer.timeout.connect(self._molecular_tick)
 
     def _toggle_blink(self):
         self._blink = not self._blink
-        if self._eng:
+        if self._eng and not self._mol_active:
             self.render(self._eng)
+
+    # ── 分子重组动画 ──
+    # 像素从旧位置平滑移动到新位置，模拟分子解散重组效果
+
+    def _get_pixels(self):
+        """收集当前缓冲区中所有亮像素的坐标"""
+        px = []
+        for y in range(OLED_H):
+            for x in range(OLED_W):
+                if self.buf.pixel(x, y) & 1:
+                    px.append((x, y))
+        return px
+
+    def _start_molecular_transition(self, old_pixels, new_pixels):
+        """启动分子重组动画: 旧像素 → 新位置"""
+        self._mol_old = old_pixels
+        self._mol_new = new_pixels
+        self._mol_frame = 0
+        self._mol_active = True
+        self._mol_timer.start(self.MOL_INTERVAL)
+
+    def _molecular_tick(self):
+        """动画单帧推进 — 列扫溶解/重组效果
+
+        效果: 旧像素从左到右逐列溶解向上飘散,
+              新像素从左到右逐列从上方沉降重组
+        """
+        self._mol_frame += 1
+        t = self._mol_frame / self.MOL_FRAMES  # 进度 0→1
+
+        if t >= 1.0:
+            self._mol_timer.stop()
+            self._mol_active = False
+            if self._eng:
+                self.render(self._eng)
+            return
+
+        ease = 1.0 - (1.0 - t) ** 2  # ease-out
+
+        old = self._mol_old
+        new = self._mol_new
+
+        self.buf.fill(0)
+
+        # ── 旧像素: 逐列从左到右溶解，向上飘散 ──
+        # 列归一化因子: 列越靠左越先溶解
+        for i, (ox, oy) in enumerate(old):
+            # 列进度: 左边先 (col_phase 小), 右边后 (col_phase 大)
+            col_phase = ox / max(OLED_W - 1, 1)  # 0~1
+            # 该像素的溶解进度, 延迟 col_phase * 0.4
+            px_t = max(0.0, min(1.0, (t - col_phase * 0.4) / 0.6))
+            px_ease = 1.0 - (1.0 - px_t) ** 2 if px_t > 0 else 0.0
+
+            if px_ease <= 0.001:
+                # 尚未溶解，留在原位
+                self._px(ox, oy, True)
+            elif px_ease < 0.999:
+                # 溶解中: 向上飘散 + 渐淡 (每帧只画部分像素实现渐淡)
+                drift_y = int(-12 * px_ease)  # 向上漂移 12px
+                y = oy + drift_y
+                # 渐淡效果: 根据进度决定是否绘制
+                # 用像素的哈希值做阈值比较，产生均匀渐淡
+                hash_val = (ox * 7 + oy * 13) & 0xFF
+                if hash_val < int((1.0 - px_ease) * 255):
+                    self._px(ox, y, True)
+            # px_ease >= 0.999: 完全溶解，不绘制
+
+        # ── 新像素: 逐列从左到右重组，从上方沉降 ──
+        for j, (tx, ty) in enumerate(new):
+            col_phase = tx / max(OLED_W - 1, 1)
+            # 新像素重组比旧像素溶解延迟 0.2
+            px_t = max(0.0, min(1.0, (t - 0.2 - col_phase * 0.4) / 0.6))
+            px_ease = 1.0 - (1.0 - px_t) ** 2 if px_t > 0 else 0.0
+
+            if px_ease <= 0.001:
+                pass  # 尚未出现
+            elif px_ease < 0.999:
+                # 从上方沉降到目标位置
+                start_y = ty - 10  # 起始位置在目标上方 10px
+                y = int(start_y + (ty - start_y) * px_ease)
+                # 渐现效果
+                hash_val = (tx * 11 + ty * 17) & 0xFF
+                if hash_val < int(px_ease * 255):
+                    self._px(tx, y, True)
+            else:
+                # 到达目标位置
+                self._px(tx, ty, True)
+
+        self.update()
 
     def _px(self, x, y, on=True):
         if 0 <= x < OLED_W and 0 <= y < OLED_H:
@@ -385,55 +609,162 @@ class OLEDWidget(QWidget):
                 if self.buf.pixel(xx, yy) & 1:
                     p.fillRect(ox + xx * SCALE, oy + yy * SCALE, SCALE, SCALE, QColor(0xFF, 0xD8, 0x30))
 
-    def render(self, eng: Engine):
-        self.buf.fill(0)
-        cur = eng.cursor
-        sel = eng.selected
+    # ── Render dispatch ──
 
+    def render(self, eng: Engine):
+        # 如果动画正在进行中，直接渲染最终帧（不重复动画）
+        if self._mol_active:
+            self._mol_timer.stop()
+            self._mol_active = False
+
+        # 检测模式切换 → 触发分子重组动画
+        animate = (self._prev_mode is not None and self._prev_mode != eng.mode)
+        old_pixels = self._get_pixels() if animate else []
+
+        # 渲染新帧到缓冲区
+        self.buf.fill(0)
+        if eng.mode == MODE_PWM_FG:
+            self._render_pwm_fg(eng)
+        elif eng.mode == MODE_FG:
+            self._render_fg(eng)
+        elif eng.mode == MODE_CH1:
+            self._render_ch(eng, 1)
+        elif eng.mode == MODE_CH2:
+            self._render_ch(eng, 2)
+        elif eng.mode == MODE_TEST:
+            self._render_test(eng)
+
+        if animate:
+            new_pixels = self._get_pixels()
+            # 启动动画并立即绘制第一帧（像素在旧位置）
+            self._start_molecular_transition(old_pixels, new_pixels)
+        else:
+            self.update()
+
+        self._prev_mode = eng.mode
+
+    def _marker(self, eng, idx):
+        if eng.cursor == idx:
+            if eng.selected:
+                return ">" if self._blink else " "
+            return ">"
+        return " "
+
+    def _row(self, eng, x, y, xvr, idx, label, val_str):
+        self._text(x, y, self._marker(eng, idx))
+        self._text(x + 6, y, label)
+        self._text_r(xvr, y, val_str)
+
+    # ── Mode 0: PWM-FG ──
+    def _render_pwm_fg(self, eng):
         self._rect(0, 0, OLED_W, OLED_H)
         self._hline(1, 126, 11)
         self._text(40, 2, "PWM_TOOL")
 
-        def marker(idx):
-            if cur == idx:
-                if sel:
-                    return ">" if self._blink else " "
-                return ">"
-            return " "
-
-        def row(x, y, xvr, idx, label, val_str):
-            self._text(x, y, marker(idx))
-            self._text(x + 6, y, label)
-            self._text_r(xvr, y, val_str)
-
         self._circle(3, 14, eng.ch1_on)
         self._text(12, 14, "CH1")
         self._text_r(59, 14, "ON" if eng.ch1_on else "OFF")
-        row(3, 26, 59, ITEM_CH1_FREQ, "Fr", f"{eng.ch1_freq}Hz")
-        row(3, 38, 59, ITEM_CH1_DUTY, "Duty", f"{eng.ch1_duty}%")
+        self._row(eng, 3, 26, 59, ITEM_CH1_FREQ, "Fr", f"{eng.ch1_freq}Hz")
+        self._row(eng, 3, 38, 59, ITEM_CH1_DUTY, "Duty", f"{eng.ch1_duty}%")
 
         self._vline(65, 12, 48)
         self._circle(68, 14, eng.ch2_on)
         self._text(77, 14, "CH2")
         self._text_r(125, 14, "ON" if eng.ch2_on else "OFF")
-        row(68, 26, 125, ITEM_CH2_FREQ, "Fr", f"{eng.ch2_freq}Hz")
-        row(68, 38, 125, ITEM_CH2_DUTY, "Duty", f"{eng.ch2_duty}%")
+        self._row(eng, 68, 26, 125, ITEM_CH2_FREQ, "Fr", f"{eng.ch2_freq}Hz")
+        self._row(eng, 68, 38, 125, ITEM_CH2_DUTY, "Duty", f"{eng.ch2_duty}%")
 
         self._hline(1, 126, 51)
         self._text(3, 54, "FG")
-        rpm_str = str(eng.fg_rpm)
-        self._text_r(62, 54, rpm_str)
+        self._text_r(62, 54, str(eng.fg_rpm))
         self._text(64, 54, "RPM")
-        self._text(98, 54, marker(ITEM_FG_DIV))
+        self._text(98, 54, self._marker(eng, ITEM_FG_DIV))
         self._text_r(125, 54, f"/{eng.fg_div}")
 
-        self.update()
+    # ── Mode 1: FG only ──
+    def _render_fg(self, eng):
+        self._rect(0, 0, OLED_W, OLED_H)
+        self._hline(1, 126, 11)
+        self._text(38, 2, "FG MODE")
+
+        rpm_str = str(eng.fg_rpm)
+        self._text(3, 16, "RPM:")
+
+        # Bold RPM display
+        start_x = (128 - len(rpm_str) * 12) // 2
+        for i, ch in enumerate(rpm_str):
+            x = start_x + i * 12
+            self._char(x, 20, ch)
+            self._char(x + 1, 20, ch)
+            self._char(x, 28, ch)
+            self._char(x + 1, 28, ch)
+
+        self._hline(1, 126, 44)
+        self._text(3, 50, "FG")
+        self._text(20, 50, f"Div:{eng.fg_div}")
+
+    # ── Mode 2 & 3: CH1 / CH2 ──
+    def _render_ch(self, eng, ch):
+        self._rect(0, 0, OLED_W, OLED_H)
+        self._hline(1, 126, 11)
+
+        if ch == 1:
+            freq, duty, on = eng.ch1_freq, eng.ch1_duty, eng.ch1_on
+            self._text(34, 2, "CH1 PWM")
+        else:
+            freq, duty, on = eng.ch2_freq, eng.ch2_duty, eng.ch2_on
+            self._text(34, 2, "CH2 PWM")
+
+        self._circle(3, 14, on)
+        self._text(12, 14, "ON" if on else "OFF")
+        self._row(eng, 3, 28, 125, 0, "Freq", f"{freq}Hz")
+        self._row(eng, 3, 40, 125, 1, "Duty", f"{duty}%")
+        self._row(eng, 3, 52, 125, 2, "EN", "ON" if on else "OFF")
+
+        self._hline(80, 126, 11)
+        self._text_r(125, 2, str(eng.fg_rpm))
+
+    # ── Mode 4: TEST ──
+    def _render_test(self, eng):
+        self._rect(0, 0, OLED_W, OLED_H)
+        self._hline(1, 126, 11)
+
+        if eng.test_running:
+            self._text(34, 2, "TEST RUN")
+            self._text(3, 16, f"RPM:{eng.fg_rpm}")
+            self._text(3, 28, f"CH{eng.test_channel} {eng.test_freq}Hz {eng.test_duty}%")
+            self._text(3, 40, f"Cycle:{eng.test_current_cycle}/{eng.test_cycles}")
+            if self._blink:
+                self._text(100, 40, ">>>")
+            self._text(3, 54, "Click=Stop")
+        else:
+            self._text(31, 2, "TEST MODE")
+
+            def trow(x, y, xvr, idx, label, val_str):
+                self._text(x, y, self._marker(eng, idx))
+                self._text(x + 6, y, label)
+                self._text_r(xvr, y, val_str)
+
+            trow(3, 16, 62, TEST_ITEM_CHANNEL, "Ch", f"CH{eng.test_channel}")
+            trow(66, 16, 125, TEST_ITEM_FREQ, "Fr", f"{eng.test_freq}Hz")
+            trow(3, 28, 62, TEST_ITEM_DUTY, "Duty", f"{eng.test_duty}%")
+            trow(66, 28, 125, TEST_ITEM_CYCLES, "N", str(eng.test_cycles))
+            trow(3, 40, 62, TEST_ITEM_ON_TIME, "ON", f"{eng.test_on_sec}s")
+            trow(66, 40, 125, TEST_ITEM_OFF_TIME, "OFF", f"{eng.test_off_sec}s")
+
+            self._hline(1, 126, 51)
+            self._text(40, 54, self._marker(eng, TEST_ITEM_START))
+            self._text(48, 54, "START")
+
+            if eng.test_record_count > 0:
+                self._text(90, 54, f"Rec:{eng.test_record_count}")
 
 
 # ── Encoder dial widget ──
 
 class EncoderDial(QWidget):
     LONG_PRESS_MS = 800
+    DOUBLE_CLICK_MS = 400
     SZ = 260
     C = 130
 
@@ -447,6 +778,11 @@ class EncoderDial(QWidget):
         self._lp_timer.setSingleShot(True)
         self._lp_timer.timeout.connect(self._on_long_press)
         self._lp_fired = False
+        # 延迟单击定时器: 第一次点击后等待 DOUBLE_CLICK_MS, 期间无第二次点击才发单击
+        self._click_timer = QTimer(self)
+        self._click_timer.setSingleShot(True)
+        self._click_timer.timeout.connect(self._fire_click)
+        self._pending_click = False
         self.setMouseTracking(True)
 
     def set_callback(self, cb):
@@ -456,6 +792,13 @@ class EncoderDial(QWidget):
         self._lp_fired = True
         if self._callback and self._pressed == 'ok':
             self._callback(EVENT_LONG_PRESS)
+
+    def _fire_click(self):
+        """延迟单击定时器到期 → 发送单击事件"""
+        if self._pending_click:
+            self._pending_click = False
+            if self._callback:
+                self._callback(EVENT_CLICK)
 
     def _hit_test(self, pos):
         c = self.C
@@ -491,9 +834,25 @@ class EncoderDial(QWidget):
         self._lp_timer.stop()
         h = self._hit_test(ev.pos())
         if h and h == self._pressed and not self._lp_fired:
-            mapping = {'cw': EVENT_CW, 'ccw': EVENT_CCW, 'ok': EVENT_CLICK}
-            if self._callback and h in mapping:
-                self._callback(mapping[h])
+            if h == 'ok':
+                if self._pending_click:
+                    # 第二次点击: 取消延迟单击, 发双击
+                    self._click_timer.stop()
+                    self._pending_click = False
+                    if self._callback:
+                        self._callback(EVENT_DOUBLE_CLICK)
+                else:
+                    # 第一次点击: 启动延迟定时器, 等待可能的第二次点击
+                    self._pending_click = True
+                    self._click_timer.start(int(self.DOUBLE_CLICK_MS))
+            else:
+                mapping = {'cw': EVENT_CW, 'ccw': EVENT_CCW}
+                if self._callback and h in mapping:
+                    self._callback(mapping[h])
+        # 清理: 长按触发或点击无效区域时, 取消待处理的单击
+        if self._lp_fired or not h or h != self._pressed:
+            self._click_timer.stop()
+            self._pending_click = False
         self._pressed = None
         self._lp_fired = False
         self.update()
@@ -511,13 +870,10 @@ class EncoderDial(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(0xd0, 0xd2, 0xdc))
         p.drawEllipse(QPoint(c, c + 2), 126, 126)
-
         p.setBrush(QColor(0xea, 0xec, 0xf2))
         p.drawEllipse(QPoint(c, c), 124, 124)
-
         p.setBrush(QColor(0xde, 0xe0, 0xe8))
         p.drawEllipse(QPoint(c, c), 112, 112)
-
         p.setBrush(QColor(0xf0, 0xf1, 0xf6))
         p.drawEllipse(QPoint(c, c), 102, 102)
 
@@ -531,6 +887,7 @@ class EncoderDial(QWidget):
                 int(c + 110 * math.cos(a)), int(c - 110 * math.sin(a))
             )
 
+        # CCW button
         ccw_p = self._pressed == 'ccw'
         ccw_h = self._hover == 'ccw'
         if ccw_p:
@@ -547,6 +904,7 @@ class EncoderDial(QWidget):
         p.drawLine(ax - 12, c, ax + 8, c - 12)
         p.drawLine(ax - 12, c, ax + 8, c + 12)
 
+        # CW button
         cw_p = self._pressed == 'cw'
         cw_h = self._hover == 'cw'
         if cw_p:
@@ -563,6 +921,7 @@ class EncoderDial(QWidget):
         p.drawLine(ax + 12, c, ax - 8, c - 12)
         p.drawLine(ax + 12, c, ax - 8, c + 12)
 
+        # OK button
         ok_p = self._pressed == 'ok'
         ok_h = self._hover == 'ok'
         if ok_p:
@@ -595,7 +954,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PWM Signal Generator Simulator")
-        self.setFixedSize(600, 850)
+        self.setFixedSize(600, 900)
         self.eng = Engine()
         self.serial = SerialComm()
         self.setStyleSheet(APP_STYLE)
@@ -603,13 +962,24 @@ class MainWindow(QMainWindow):
         central = QWidget()
         root = QVBoxLayout(central)
         root.setContentsMargins(24, 20, 24, 20)
-        root.setSpacing(12)
+        root.setSpacing(10)
 
         # ── Title ──
         title = QLabel("PWM TOOL")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("color:#2a3050; font-size:18px; font-weight:bold; letter-spacing:4px;")
         root.addWidget(title)
+
+        # ── Mode indicator ──
+        self.mode_lbl = QLabel("PWM-FG")
+        self.mode_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.mode_lbl.setStyleSheet("""
+            color:#005898; font-size:13px; font-weight:bold;
+            background:#e0f0ff; border:1px solid #b0d8f0;
+            border-radius:6px; padding:4px 16px;
+            font-family:Consolas,monospace;
+        """)
+        root.addWidget(self.mode_lbl)
 
         # ── OLED ──
         self.oled = OLEDWidget()
@@ -693,6 +1063,18 @@ class MainWindow(QMainWindow):
         status_row.addWidget(self.ch2_card)
         root.addLayout(status_row)
 
+        # ── Test status bar ──
+        self.test_lbl = QLabel("")
+        self.test_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.test_lbl.setStyleSheet("""
+            color:#cc6600; font-size:12px; font-weight:bold;
+            background:#fff8f0; border:1px solid #f0d8a0;
+            border-radius:6px; padding:4px 12px;
+            font-family:Consolas,monospace;
+        """)
+        self.test_lbl.setVisible(False)
+        root.addWidget(self.test_lbl)
+
         # ── Encoder ──
         el = QLabel("ENCODER")
         el.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -704,7 +1086,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self.encoder, 0, Qt.AlignmentFlag.AlignCenter)
 
         # ── Tip ──
-        tip = QLabel("OK  toggle channel  |  Long-press  select item")
+        tip = QLabel("OK toggle  |  Long-press select  |  Double-click mode")
         tip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         tip.setStyleSheet("color:#a0a4b0; font-size:10px; letter-spacing:1px;")
         root.addWidget(tip)
@@ -712,17 +1094,15 @@ class MainWindow(QMainWindow):
         root.addStretch()
         self.setCentralWidget(central)
 
-        # ── Serial poll timer ──
+        # ── Timers ──
         self.serial_timer = QTimer(self)
         self.serial_timer.timeout.connect(self._poll_serial)
-        self.serial_timer.start(50)  # 20Hz poll
+        self.serial_timer.start(50)
 
-        # ── Status request timer ──
         self.status_timer = QTimer(self)
         self.status_timer.timeout.connect(self._request_status)
-        self.status_timer.start(500)  # 2Hz status request
+        self.status_timer.start(500)
 
-        # ── Auto-refresh ports on startup ──
         if HAS_SERIAL:
             self._refresh_ports()
         else:
@@ -786,15 +1166,48 @@ class MainWindow(QMainWindow):
                     self.eng.ch2_on = status['ch2_on']
                     self.eng.fg_div = status['fg_div']
                     self.eng.fg_rpm = status['rpm']
+                    self.eng.mode = status['mode']
+                    self.eng.test_running = (status['test_state'] == 1)
+                    self.eng.test_current_cycle = status['test_cycle']
                     self._refresh()
+            elif cmd == CMD_EXPORT_CHUNK:
+                # Receive CSV line
+                try:
+                    line = data.decode('ascii', errors='replace')
+                    self.eng.export_csv_lines.append(line)
+                except Exception:
+                    pass
+            elif cmd == CMD_EXPORT_DONE:
+                # Export complete — save to file
+                self._save_export_csv()
             result = self.serial.poll()
 
+    def _save_export_csv(self):
+        if not self.eng.export_csv_lines:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Test Data", "test_data.csv", "CSV Files (*.csv)")
+        if path:
+            try:
+                with open(path, 'w', newline='') as f:
+                    for line in self.eng.export_csv_lines:
+                        f.write(line)
+                self.test_lbl.setText(f"Exported {len(self.eng.export_csv_lines)} lines")
+                self.test_lbl.setStyleSheet("""
+                    color:#008844; font-size:12px; font-weight:bold;
+                    background:#e8f8f0; border:1px solid #b0e8cc;
+                    border-radius:6px; padding:4px 12px;
+                    font-family:Consolas,monospace;
+                """)
+                self.test_lbl.setVisible(True)
+            except Exception as e:
+                self.test_lbl.setText(f"Export failed: {e}")
+        self.eng.export_csv_lines = []
+
     def _on(self, ev):
-        # Process locally
         self.eng.process(ev)
         self._refresh()
 
-        # Forward to hardware if connected
         if self.serial.connected:
             ev_map = {
                 EVENT_CW: 1, EVENT_CCW: 2,
@@ -803,49 +1216,109 @@ class MainWindow(QMainWindow):
             if ev in ev_map:
                 self.serial.send_key_event(ev_map[ev])
 
-            # Also sync current param to hardware after value change
+            # Sync params to hardware
             if ev in (EVENT_CW, EVENT_CCW) and not self.eng.selected:
-                ch = 1 if self.eng.cursor <= ITEM_CH1_DUTY else 2
-                if ch == 1:
-                    self.serial.send_write_pwm(1, self.eng.ch1_freq,
-                                               self.eng.ch1_duty, self.eng.ch1_on)
-                else:
-                    self.serial.send_write_pwm(2, self.eng.ch2_freq,
-                                               self.eng.ch2_duty, self.eng.ch2_on)
+                if self.eng.mode == MODE_PWM_FG:
+                    ch = 1 if self.eng.cursor <= ITEM_CH1_DUTY else 2
+                    if ch == 1:
+                        self.serial.send_write_pwm(1, self.eng.ch1_freq, self.eng.ch1_duty, self.eng.ch1_on)
+                    else:
+                        self.serial.send_write_pwm(2, self.eng.ch2_freq, self.eng.ch2_duty, self.eng.ch2_on)
+                elif self.eng.mode == MODE_CH1:
+                    self.serial.send_write_pwm(1, self.eng.ch1_freq, self.eng.ch1_duty, self.eng.ch1_on)
+                elif self.eng.mode == MODE_CH2:
+                    self.serial.send_write_pwm(2, self.eng.ch2_freq, self.eng.ch2_duty, self.eng.ch2_on)
+                elif self.eng.mode == MODE_FG:
+                    self.serial.send_write_fg_div(self.eng.fg_div)
 
             if ev == EVENT_CLICK and not self.eng.selected:
-                ch = 1 if self.eng.cursor <= ITEM_CH1_DUTY else 2
-                if ch == 1:
-                    self.serial.send_write_pwm(1, self.eng.ch1_freq,
-                                               self.eng.ch1_duty, self.eng.ch1_on)
-                else:
-                    self.serial.send_write_pwm(2, self.eng.ch2_freq,
-                                               self.eng.ch2_duty, self.eng.ch2_on)
+                if self.eng.mode == MODE_PWM_FG:
+                    ch = 1 if self.eng.cursor <= ITEM_CH1_DUTY else 2
+                    if ch == 1:
+                        self.serial.send_write_pwm(1, self.eng.ch1_freq, self.eng.ch1_duty, self.eng.ch1_on)
+                    else:
+                        self.serial.send_write_pwm(2, self.eng.ch2_freq, self.eng.ch2_duty, self.eng.ch2_on)
+                elif self.eng.mode in (MODE_CH1, MODE_CH2):
+                    ch = 1 if self.eng.mode == MODE_CH1 else 2
+                    if ch == 1:
+                        self.serial.send_write_pwm(1, self.eng.ch1_freq, self.eng.ch1_duty, self.eng.ch1_on)
+                    else:
+                        self.serial.send_write_pwm(2, self.eng.ch2_freq, self.eng.ch2_duty, self.eng.ch2_on)
 
     def _refresh(self):
         self.oled.render(self.eng)
 
-        names = {0: "CH1 FREQ", 1: "CH1 DUTY",
-                 2: "CH2 FREQ", 3: "CH2 DUTY",
-                 4: "FG DIV"}
-        lbl = names.get(self.eng.cursor, "")
-        if self.eng.selected:
-            lbl += "  [SELECT]"
+        # Mode indicator
+        self.mode_lbl.setText(MODE_NAMES[self.eng.mode])
+
+        # State label
+        mode = self.eng.mode
+        if mode == MODE_TEST:
+            if self.eng.test_running:
+                lbl = f"TEST RUNNING  Cycle {self.eng.test_current_cycle}/{self.eng.test_cycles}"
+            else:
+                names = {0: "CH", 1: "FREQ", 2: "DUTY", 3: "CYCLES",
+                         4: "ON TIME", 5: "OFF TIME", 6: "START"}
+                lbl = f"TEST: {names.get(self.eng.cursor, '')}"
+                if self.eng.selected:
+                    lbl += "  [SELECT]"
+        elif mode == MODE_FG:
+            lbl = "FG DIV"
+            if self.eng.selected:
+                lbl += "  [SELECT]"
+        elif mode == MODE_CH1:
+            names = {0: "CH1 FREQ", 1: "CH1 DUTY", 2: "CH1 EN"}
+            lbl = names.get(self.eng.cursor, "")
+            if self.eng.selected:
+                lbl += "  [SELECT]"
+        elif mode == MODE_CH2:
+            names = {0: "CH2 FREQ", 1: "CH2 DUTY", 2: "CH2 EN"}
+            lbl = names.get(self.eng.cursor, "")
+            if self.eng.selected:
+                lbl += "  [SELECT]"
+        else:
+            names = {0: "CH1 FREQ", 1: "CH1 DUTY", 2: "CH2 FREQ", 3: "CH2 DUTY", 4: "FG DIV"}
+            lbl = names.get(self.eng.cursor, "")
+            if self.eng.selected:
+                lbl += "  [SELECT]"
         self.state_lbl.setText(lbl)
 
+        # Channel cards
         if self.eng.ch1_on:
-            self.ch1_card.setText("CH1   ON")
+            self.ch1_card.setText(f"CH1  {self.eng.ch1_freq}Hz  {self.eng.ch1_duty}%")
             self.ch1_card.setStyleSheet("color:#008844; font-size:14px; font-weight:bold; font-family:Consolas,monospace; background:#e8f8f0; border:1px solid #b0e8cc; border-radius:8px; padding:8px 20px;")
         else:
             self.ch1_card.setText("CH1  OFF")
             self.ch1_card.setStyleSheet("color:#998888; font-size:14px; font-weight:bold; font-family:Consolas,monospace; background:#fff; border:1px solid #d8dae2; border-radius:8px; padding:8px 20px;")
 
         if self.eng.ch2_on:
-            self.ch2_card.setText("CH2   ON")
+            self.ch2_card.setText(f"CH2  {self.eng.ch2_freq}Hz  {self.eng.ch2_duty}%")
             self.ch2_card.setStyleSheet("color:#008844; font-size:14px; font-weight:bold; font-family:Consolas,monospace; background:#e8f8f0; border:1px solid #b0e8cc; border-radius:8px; padding:8px 20px;")
         else:
             self.ch2_card.setText("CH2  OFF")
             self.ch2_card.setStyleSheet("color:#998888; font-size:14px; font-weight:bold; font-family:Consolas,monospace; background:#fff; border:1px solid #d8dae2; border-radius:8px; padding:8px 20px;")
+
+        # Test status bar
+        if self.eng.test_running:
+            self.test_lbl.setText(f"TEST RUNNING  CH{self.eng.test_channel}  Cycle {self.eng.test_current_cycle}/{self.eng.test_cycles}")
+            self.test_lbl.setStyleSheet("""
+                color:#cc6600; font-size:12px; font-weight:bold;
+                background:#fff8f0; border:1px solid #f0d8a0;
+                border-radius:6px; padding:4px 12px;
+                font-family:Consolas,monospace;
+            """)
+            self.test_lbl.setVisible(True)
+        elif mode == MODE_TEST:
+            self.test_lbl.setText(f"Test ready  Records: {self.eng.test_record_count}")
+            self.test_lbl.setStyleSheet("""
+                color:#4a60a0; font-size:12px; font-weight:bold;
+                background:#f0f4ff; border:1px solid #c0d0e8;
+                border-radius:6px; padding:4px 12px;
+                font-family:Consolas,monospace;
+            """)
+            self.test_lbl.setVisible(True)
+        else:
+            self.test_lbl.setVisible(False)
 
     def closeEvent(self, ev):
         self.serial.disconnect()

@@ -167,16 +167,66 @@ static void handle_read_status(void) {
     sd.fg_freq_mhz   = 0;  // filled by caller if needed
     sd.fg_div        = g_params.fg_div;
     sd.rpm           = 0;
+    sd.mode          = g_menu.mode;
+    sd.test_state    = Menu_IsTestRunning() ? 1 : 0;
+    sd.test_cycle    = 0;
+    sd.test_total    = Menu_GetTestCycles();
     send_frame(CMD_READ_STATUS, (const uint8_t *)&sd, sizeof(StatusData));
+}
+
+static void handle_set_test(void) {
+    if (frame_len != sizeof(TestConfig)) return;
+    // TestConfig is handled by updating global test params
+    // The actual test parameters are set via Menu's test variables
+    // For now, acknowledge — simulator sends params via separate mechanism
+    send_ack(CMD_SET_TEST);
+}
+
+static void handle_start_test(void) {
+    Menu_StartTest();
+    send_ack(CMD_START_TEST);
+}
+
+static void handle_stop_test(void) {
+    Menu_StopTest();
+    send_ack(CMD_STOP_TEST);
+}
+
+static void handle_export_data(void) {
+    // Send first chunk immediately, rest via Protocol_ProcessExport
+    uint8_t chunk[64];
+    uint8_t len = Menu_FormatExportChunk(chunk, sizeof(chunk));
+    if (len > 0) {
+        send_frame(CMD_EXPORT_CHUNK, chunk, len);
+    } else {
+        send_frame(CMD_EXPORT_DONE, NULL, 0);
+    }
+}
+
+// Called in main loop to continue export after first chunk
+void Protocol_ProcessExport(void) {
+    if (Menu_ExportDone()) return;
+
+    uint8_t chunk[64];
+    uint8_t len = Menu_FormatExportChunk(chunk, sizeof(chunk));
+    if (len > 0) {
+        send_frame(CMD_EXPORT_CHUNK, chunk, len);
+    } else {
+        send_frame(CMD_EXPORT_DONE, NULL, 0);
+    }
 }
 
 // ── Dispatch received frame (CRC already verified by parser) ──
 static void dispatch_frame(void) {
     switch (frame_cmd) {
-        case CMD_READ_STATUS:  handle_read_status();  break;
-        case CMD_WRITE_PWM:    handle_write_pwm();    break;
-        case CMD_WRITE_FG_DIV: handle_write_fg_div(); break;
-        case CMD_KEY_EVENT:    handle_key_event();     break;
+        case CMD_READ_STATUS:  handle_read_status();   break;
+        case CMD_WRITE_PWM:    handle_write_pwm();     break;
+        case CMD_WRITE_FG_DIV: handle_write_fg_div();  break;
+        case CMD_KEY_EVENT:    handle_key_event();      break;
+        case CMD_SET_TEST:     handle_set_test();       break;
+        case CMD_START_TEST:   handle_start_test();     break;
+        case CMD_STOP_TEST:    handle_stop_test();      break;
+        case CMD_EXPORT_DATA:  handle_export_data();    break;
         default: break;  // unknown command, ignore
     }
 }
