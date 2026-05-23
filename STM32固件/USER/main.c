@@ -250,7 +250,7 @@ int main(void) {
     Menu_Init();                // 菜单: 恢复默认参数, 初始化状态
 
     // ── 主循环控制变量 ──
-    u32 last_render = 0;        // 上次 OLED 渲染时刻 (50ms 周期)
+    u32 last_render = 0;        // 上次 OLED 渲染时刻 (25ms 周期)
     u32 last_status = 0;        // 上次状态上报时刻 (500ms 周期)
     u8  prev_test_running = 0;  // 上一次测试运行状态 (用于检测上升沿启动)
 
@@ -316,11 +316,11 @@ int main(void) {
         }
 
         // ┌─────────────────────────────────────────────────────────┐
-        // │  任务 4: OLED 渲染 (50ms 周期 = 20fps)                  │
+        // │  任务 4: OLED 渲染 (25ms 周期 = 40fps)                  │
         // │  读取当前 RPM → 调用 UI_Render 刷新屏幕                 │
-        // │  20fps 是软件 I2C OLED 的合理帧率, 再高会闪屏           │
+        // │  OLED_Clear 不再自带刷新, 每帧仅一次 OLED_Refresh       │
         // └─────────────────────────────────────────────────────────┘
-        if (sys_tick - last_render >= 50) {
+        if (sys_tick - last_render >= 25) {
             last_render = sys_tick;
             rpm = FG_CalculateRPM(g_params.fg_div, g_params.fg_pulses_per_rev);
             UI_Render(&g_params, rpm, blink_flag);

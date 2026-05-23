@@ -542,6 +542,7 @@ static s8  pipe_gap_y[2];   // 两根管道间隙的顶部 y 坐标
 static u8  game_score;       // 当前分数
 static u8  game_state;       // GAME_READY / GAME_PLAYING / GAME_OVER
 static u8  prev_render_mode = 0xFF;  // 上次渲染的模式 (用于检测模式切换)
+static u8  game_tick;        // 帧计数器 (物理每2帧更新一次, 渲染每帧都执行)
 
 static void render_game_mode(u8 blink) {
     u8 buf[4];
@@ -554,6 +555,7 @@ static void render_game_mode(u8 blink) {
         pipe_x[1] = 120; pipe_gap_y[1] = 30;
         game_score = 0;
         game_state = GAME_READY;
+        game_tick = 0;
     }
     prev_render_mode = MODE_GAME;
 
@@ -575,8 +577,9 @@ static void render_game_mode(u8 blink) {
         }
     }
 
-    /* ── 物理更新 (PLAYING 状态) ── */
-    if (game_state == GAME_PLAYING) {
+    /* ── 物理更新 (PLAYING 状态, 每 2 帧更新一次) ── */
+    game_tick++;
+    if (game_state == GAME_PLAYING && (game_tick & 1)) {
         bird_vy += GRAVITY;
         bird_y += bird_vy;
         if (bird_y < 0) { bird_y = 0; bird_vy = 0; }

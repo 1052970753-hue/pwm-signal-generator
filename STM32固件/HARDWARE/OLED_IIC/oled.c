@@ -156,7 +156,6 @@ void OLED_Clear(void)
 			 OLED_GRAM[n][i]=0;//�����������
 			}
   }
-	OLED_Refresh();//������ʾ
 }
 
 //���� 

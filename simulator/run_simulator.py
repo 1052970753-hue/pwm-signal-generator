@@ -482,6 +482,10 @@ class OLEDWidget(QWidget):
         self._blink_timer = QTimer(self)
         self._blink_timer.timeout.connect(self._toggle_blink)
         self._blink_timer.start(400)
+        # 游戏物理定时器 (50ms = 20fps, 独立于渲染)
+        self._game_timer = QTimer(self)
+        self._game_timer.timeout.connect(self._game_physics_tick)
+        self._game_timer_active = False
         # 分子重组动画状态
         self._prev_mode = None           # 上次渲染的模式
         self._mol_active = False         # 动画是否进行中
@@ -495,6 +499,38 @@ class OLEDWidget(QWidget):
         self._blink = not self._blink
         if self._eng and not self._mol_active:
             self.render(self._eng)
+
+    def _game_physics_tick(self):
+        """游戏物理定时器回调 (50ms), 独立于渲染帧率"""
+        if not self._eng or self._eng.mode != MODE_GAME:
+            return
+        eng = self._eng
+        if eng.game_state == 1:  # PLAYING
+            eng.bird_vy += 1
+            eng.bird_y += eng.bird_vy
+            if eng.bird_y < 0:
+                eng.bird_y = 0
+                eng.bird_vy = 0
+            for i in range(2):
+                eng.pipe_x[i] -= 1
+                if eng.pipe_x[i] < -12:
+                    eng.pipe_x[i] = 128
+                    eng.pipe_gap_y[i] = 8 + random.randint(0, 34)
+                if eng.pipe_x[i] + 12 == 20:
+                    eng.game_score += 1
+            # Collision
+            if eng.bird_y + 4 >= 60:
+                eng.game_state = 2
+            else:
+                for i in range(2):
+                    px = eng.pipe_x[i]
+                    if 24 > px and 20 < px + 12:
+                        if eng.bird_y < eng.pipe_gap_y[i] or eng.bird_y + 4 > eng.pipe_gap_y[i] + 16:
+                            eng.game_state = 2
+                            break
+            # 刷新显示
+            if not self._mol_active:
+                self.render(eng)
 
     # ── 分子重组动画 ──
     # 像素从旧位置平滑移动到新位置，模拟分子解散重组效果
@@ -673,9 +709,17 @@ class OLEDWidget(QWidget):
             self._mol_timer.stop()
             self._mol_active = False
 
-        # 检测模式切换 → 触发分子重组动画
+        # 检测模式切换 → 触发分子重组动画 + 游戏定时器
         animate = (self._prev_mode is not None and self._prev_mode != eng.mode)
         old_pixels = self._get_pixels() if animate else []
+
+        # 游戏物理定时器启停
+        if eng.mode == MODE_GAME and not self._game_timer_active:
+            self._game_timer.start(50)
+            self._game_timer_active = True
+        elif eng.mode != MODE_GAME and self._game_timer_active:
+            self._game_timer.stop()
+            self._game_timer_active = False
 
         # 渲染新帧到缓冲区
         self.buf.fill(0)
@@ -865,34 +909,7 @@ class OLEDWidget(QWidget):
         PIPE_GAP = 16
         GROUND_Y = 60
 
-        # Physics update (PLAYING)
-        if eng.game_state == 1:
-            eng.bird_vy += 1
-            eng.bird_y += eng.bird_vy
-            if eng.bird_y < 0:
-                eng.bird_y = 0
-                eng.bird_vy = 0
-
-            for i in range(2):
-                eng.pipe_x[i] -= 1
-                if eng.pipe_x[i] < -PIPE_W:
-                    eng.pipe_x[i] = 128
-                    eng.pipe_gap_y[i] = 8 + random.randint(0, 34)
-                if eng.pipe_x[i] + PIPE_W == BIRD_X:
-                    eng.game_score += 1
-
-            # Collision
-            if eng.bird_y + BIRD_SIZE >= GROUND_Y:
-                eng.game_state = 2
-            else:
-                for i in range(2):
-                    px = eng.pipe_x[i]
-                    if BIRD_X + BIRD_SIZE > px and BIRD_X < px + PIPE_W:
-                        if eng.bird_y < eng.pipe_gap_y[i] or eng.bird_y + BIRD_SIZE > eng.pipe_gap_y[i] + PIPE_GAP:
-                            eng.game_state = 2
-                            break
-
-        # Render
+        # Render (physics is handled by _game_physics_tick timer)
         self._rect(0, 0, OLED_W, OLED_H)
 
         # Title + score
