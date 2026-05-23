@@ -42,3 +42,8 @@ Desktop.ini
 
 # AI generated
 docs/superpowers/
+
+# PyInstaller
+simulator/dist/
+simulator/build/
+*.spec

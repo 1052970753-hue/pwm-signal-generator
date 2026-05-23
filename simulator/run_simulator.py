@@ -3,7 +3,7 @@
 import sys, math, struct, os, time
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QLabel, QFrame, QComboBox, QPushButton, QFileDialog
+    QLabel, QFrame, QComboBox, QPushButton, QFileDialog, QGroupBox
 )
 from PyQt6.QtGui import QPainter, QColor, QImage, QFont, QPen, QBrush
 from PyQt6.QtCore import Qt, QPoint, QRect, QTimer
@@ -1084,6 +1084,34 @@ class MainWindow(QMainWindow):
         self.encoder = EncoderDial()
         self.encoder.set_callback(self._on)
         root.addWidget(self.encoder, 0, Qt.AlignmentFlag.AlignCenter)
+
+        # ── Help panel (collapsible) ──
+        self.help_group = QGroupBox("  使用说明 / Instructions  ▼")
+        self.help_group.setCheckable(True)
+        self.help_group.setChecked(False)
+        self.help_group.setStyleSheet("""
+            QGroupBox {
+                font-size:11px; font-weight:bold; color:#506080;
+                border:1px solid #c0c8d8; border-radius:8px;
+                margin-top:6px; padding:12px 8px 8px 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin; left:12px; padding:0 4px;
+            }
+        """)
+        help_layout = QVBoxLayout(self.help_group)
+        help_layout.setSpacing(4)
+        help_layout.setContentsMargins(8, 4, 8, 4)
+
+        help_text = QLabel(
+            "【操作】旋转旋钮调参  |  点击OK启停通道  |  长按OK选择项目  |  双击OK切换模式\n"
+            "【模式】PWM-FG:双通道输出  FG:频率计  CH1/CH2:单通道调节  TEST:自动测试循环\n"
+            "【串口】选择COM口 → Connect连接硬件，参数自动同步，TEST数据可导出CSV"
+        )
+        help_text.setWordWrap(True)
+        help_text.setStyleSheet("color:#606878; font-size:10px; font-weight:normal; line-height:1.4;")
+        help_layout.addWidget(help_text)
+        root.addWidget(self.help_group)
 
         # ── Tip ──
         tip = QLabel("OK toggle  |  Long-press select  |  Double-click mode")
