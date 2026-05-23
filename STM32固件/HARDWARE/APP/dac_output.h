@@ -15,11 +15,11 @@
 void DAC_Output_Init(void);
 
 /* 设置 DAC 输出电压
- * voltage_x10: 目标电压 ×10 (0~50 = 0.0~5.0V)
- *              DAC 输出 = voltage_x10 / 50.0 × 3.3V
- *              运放放大 1.515 倍后 = voltage_x10 / 10.0 V
+ * voltage_x100: 目标电压 ×100 (0~500 = 0.00~5.00V)
+ *              DAC 输出 = voltage_x100 / 500.0 × 3.3V
+ *              运放放大 1.515 倍后 = voltage_x100 / 100.0 V
  */
-void DAC_Output_SetVoltage(u8 voltage_x10);
+void DAC_Output_SetVoltage(u16 voltage_x100);
 
 /* 关闭 DAC 输出 (PA4 输出 0V) */
 void DAC_Output_Off(void);

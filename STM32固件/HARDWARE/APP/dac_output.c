@@ -5,9 +5,9 @@
  *  经外部运放 (MCP6002) ×1.515 放大到 0~5V
  *
  *  电压映射:
- *    vsp_voltage_x10 = 0  → DAC 0    → PA4 0V    → VSP 0V
- *    vsp_voltage_x10 = 50 → DAC 4095 → PA4 3.3V  → VSP 5.0V
- *    通用公式: DAC值 = voltage_x10 × 4095 / 50
+ *    vsp_voltage_x100 = 0   → DAC 0    → PA4 0V    → VSP 0.00V
+ *    vsp_voltage_x100 = 500 → DAC 4095 → PA4 3.3V  → VSP 5.00V
+ *    通用公式: DAC值 = voltage_x100 × 4095 / 500
  */
 #include "dac_output.h"
 #include "stm32f10x.h"
@@ -41,17 +41,17 @@ void DAC_Output_Init(void)
 }
 
 /* 设置 DAC 输出电压
- * voltage_x10: 目标电压 ×10 (0~50)
+ * voltage_x100: 目标电压 ×100 (0~500 = 0.00~5.00V)
  * 映射到 DAC 12位值 (0~4095)
  */
-void DAC_Output_SetVoltage(u8 voltage_x10)
+void DAC_Output_SetVoltage(u16 voltage_x100)
 {
     u16 dac_val;
 
-    if (voltage_x10 > 50) voltage_x10 = 50;
+    if (voltage_x100 > 500) voltage_x100 = 500;
 
-    /* DAC值 = voltage_x10 × 4095 / 50 */
-    dac_val = (u16)((u32)voltage_x10 * 4095 / 50);
+    /* DAC值 = voltage_x100 × 4095 / 500 */
+    dac_val = (u16)((u32)voltage_x100 * 4095 / 500);
 
     DAC_SetChannel1Data(DAC_Align_12b_R, dac_val);
 }

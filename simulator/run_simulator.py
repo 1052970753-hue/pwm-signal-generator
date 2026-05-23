@@ -83,7 +83,7 @@ class Engine:
         self.fg_rpm = 0
 
         # VSP params
-        self.vsp_voltage_x10 = 0  # 0~50 = 0.0~5.0V
+        self.vsp_voltage_x100 = 0  # 0~500 = 0.00~5.00V
         self.vsp_on = False
 
         # Mode & navigation
@@ -131,7 +131,7 @@ class Engine:
         elif self.mode == MODE_FG:
             return self.fg_div
         elif self.mode == MODE_VSP:
-            return [self.vsp_voltage_x10, 0][self.cursor]
+            return [self.vsp_voltage_x100, 0][self.cursor]
         return 0
 
     def _set_value(self, v):
@@ -153,7 +153,7 @@ class Engine:
         elif self.mode == MODE_FG:
             self.fg_div = max(1, min(99, v))
         elif self.mode == MODE_VSP:
-            if self.cursor == 0: self.vsp_voltage_x10 = max(0, min(50, v))
+            if self.cursor == 0: self.vsp_voltage_x100 = max(0, min(500, v))
 
     def _get_test_value(self):
         return [self.test_channel, self.test_freq, self.test_duty,
@@ -321,8 +321,8 @@ class SerialComm:
     def send_export_data(self):
         self._send(build_frame(CMD_EXPORT_DATA))
 
-    def send_write_vsp(self, voltage_x10, enabled):
-        self._send(build_frame(CMD_WRITE_VSP, struct.pack('BB', voltage_x10, enabled)))
+    def send_write_vsp(self, voltage_x100, enabled):
+        self._send(build_frame(CMD_WRITE_VSP, struct.pack('<HB', voltage_x100, enabled)))
 
     def poll(self):
         """Read available bytes, parse frames, return (cmd, data) or None."""
@@ -356,8 +356,8 @@ class SerialComm:
         return None
 
     def read_status_data(self, data):
-        """Parse StatusData from frame data (28 bytes)."""
-        if len(data) < 28:
+        """Parse StatusData from frame data (29 bytes)."""
+        if len(data) < 29:
             return None
         return {
             'ch1_freq':    struct.unpack_from('<I', data, 0)[0],
@@ -373,9 +373,9 @@ class SerialComm:
             'test_state':  data[20],
             'test_cycle':  struct.unpack_from('<H', data, 21)[0],
             'test_total':  struct.unpack_from('<H', data, 23)[0],
-            'vsp_voltage': data[25],
-            'vsp_on':      bool(data[26]),
-            'test_on_method': data[27],
+            'vsp_voltage_x100': struct.unpack_from('<H', data, 25)[0],
+            'vsp_on':      bool(data[27]),
+            'test_on_method': data[28],
         }
 
 
@@ -763,27 +763,34 @@ class OLEDWidget(QWidget):
         self._hline(1, 126, 11)
         self._text(34, 2, "VSP CTRL")
 
-        voltage = eng.vsp_voltage_x10 / 10.0
+        v = eng.vsp_voltage_x100
+        voltage = v / 100.0
         on = eng.vsp_on
 
         self._circle(3, 14, on)
         self._text(12, 14, "ON" if on else "OFF")
 
-        # 大号电压数字
-        v_str = f"{voltage:.1f}V"
-        self._text(30, 24, v_str)
+        # 大号电压数字 (2位小数)
+        v_str = f"{voltage:.2f}V"
+        start_x = (128 - len(v_str) * 12) // 2
+        for i, ch in enumerate(v_str):
+            x = start_x + i * 12
+            self._char(x, 18, ch)
+            self._char(x + 1, 18, ch)
+            self._char(x, 26, ch)
+            self._char(x + 1, 26, ch)
 
         # 百分比条
-        pct = eng.vsp_voltage_x10 * 2  # 0~100
+        pct = v * 100 // 500  # 0~100
         bar_w = 100
         fill_w = bar_w * pct // 100
-        self._rect(14, 40, bar_w, 6)
+        self._rect(14, 38, bar_w, 6)
         for x2 in range(14, 14 + fill_w):
-            for y2 in range(40, 46):
+            for y2 in range(38, 44):
                 self.buf.setPixel(x2, y2, 1)
 
         self._hline(1, 126, 50)
-        self._row(eng, 3, 53, 62, 0, "Vout", f"{voltage:.1f}V")
+        self._row(eng, 3, 53, 62, 0, "Vout", f"{voltage:.2f}V")
         self._row(eng, 68, 53, 125, 1, "EN", "ON" if on else "OFF")
 
     # ── Mode 5: TEST ──
@@ -814,14 +821,14 @@ class OLEDWidget(QWidget):
             trow(3, 40, 62, TEST_ITEM_ON_TIME, "ON", f"{eng.test_on_sec}s")
             trow(66, 40, 125, TEST_ITEM_OFF_TIME, "OFF", f"{eng.test_off_sec}s")
             method_names = ["PWM", "Relay", "Both"]
-            trow(3, 52, 62, TEST_ITEM_ON_METHOD, "Mode", method_names[eng.test_on_method])
+            trow(66, 52, 125, TEST_ITEM_ON_METHOD, "Mode", method_names[eng.test_on_method])
 
-            self._hline(66, 126, 51)
-            self._text(40, 54, self._marker(eng, TEST_ITEM_START))
-            self._text(48, 54, "START")
+            self._hline(1, 126, 51)
+            self._text(3, 54, self._marker(eng, TEST_ITEM_START))
+            self._text(11, 54, "START")
 
             if eng.test_record_count > 0:
-                self._text(90, 54, f"Rec:{eng.test_record_count}")
+                self._text(70, 54, f"Rec:{eng.test_record_count}")
 
 
 # ── Encoder dial widget ──
@@ -1288,7 +1295,7 @@ class MainWindow(QMainWindow):
                     self.eng.mode = status['mode']
                     self.eng.test_running = (status['test_state'] == 1)
                     self.eng.test_current_cycle = status['test_cycle']
-                    self.eng.vsp_voltage_x10 = status.get('vsp_voltage', 0)
+                    self.eng.vsp_voltage_x100 = status.get('vsp_voltage_x100', 0)
                     self.eng.vsp_on = status.get('vsp_on', False)
                     self.eng.test_on_method = status.get('test_on_method', 0)
                     self._refresh()
@@ -1353,7 +1360,7 @@ class MainWindow(QMainWindow):
                 elif self.eng.mode == MODE_FG:
                     self.serial.send_write_fg_div(self.eng.fg_div)
                 elif self.eng.mode == MODE_VSP:
-                    self.serial.send_write_vsp(self.eng.vsp_voltage_x10, self.eng.vsp_on)
+                    self.serial.send_write_vsp(self.eng.vsp_voltage_x100, self.eng.vsp_on)
 
             if ev == EVENT_CLICK and not self.eng.selected:
                 if self.eng.mode == MODE_PWM_FG:
@@ -1369,7 +1376,7 @@ class MainWindow(QMainWindow):
                     else:
                         self.serial.send_write_pwm(2, self.eng.ch2_freq, self.eng.ch2_duty, self.eng.ch2_on)
                 elif self.eng.mode == MODE_VSP:
-                    self.serial.send_write_vsp(self.eng.vsp_voltage_x10, self.eng.vsp_on)
+                    self.serial.send_write_vsp(self.eng.vsp_voltage_x100, self.eng.vsp_on)
 
     def _refresh(self):
         self.oled.render(self.eng)

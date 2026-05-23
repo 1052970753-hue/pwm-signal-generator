@@ -165,7 +165,7 @@ typedef struct {
     u8  ch2_enabled;        // CH2 输出使能 (0=关, 1=开)
     u8  fg_div;             // FG 输入分频系数 (1~99)
     u16 fg_pulses_per_rev;  // FG 每转脉冲数 (默认2, 用于 RPM 计算)
-    u8  vsp_voltage_x10;    // VSP 输出电压 ×10 (0~50, 即 0.0~5.0V)
+    u16 vsp_voltage_x100;   // VSP 输出电压 ×100 (0~500, 即 0.00~5.00V)
     u8  vsp_enabled;        // VSP 使能 (0=关, 1=开)
     u8  test_on_method;     // 测试 ON 方式 (0=PWM, 1=继电器, 2=两者)
 } SystemParams;
@@ -192,23 +192,23 @@ typedef struct {
  *    偏移 23: test_total     (2B)  总循环数
  */
 typedef struct {
-    u32 ch1_freq_hz;    // CH1 频率
-    u8  ch1_duty_pct;   // CH1 占空比
-    u8  ch1_enabled;    // CH1 使能
-    u32 ch2_freq_hz;    // CH2 频率
-    u8  ch2_duty_pct;   // CH2 占空比
-    u8  ch2_enabled;    // CH2 使能
-    u32 fg_freq_mhz;    // FG 频率 (毫赫兹, 精度 0.001Hz)
-    u8  fg_div;         // FG 分频系数
-    u16 rpm;            // 实时转速 (RPM)
-    u8  mode;           // 当前应用模式
-    u8  test_state;     // 测试状态 (0=空闲, 1=运行, 2=完成)
-    u16 test_cycle;     // 当前测试循环
-    u16 test_total;     // 总循环数
-    u8  vsp_voltage_x10;// VSP 电压 ×10 (0~50 = 0.0~5.0V)
-    u8  vsp_enabled;    // VSP 使能
-    u8  test_on_method; // 测试 ON 方式 (0=PWM, 1=继电器, 2=两者)
-} StatusData;
+    u32 ch1_freq_hz;        // CH1 频率
+    u8  ch1_duty_pct;       // CH1 占空比
+    u8  ch1_enabled;        // CH1 使能
+    u32 ch2_freq_hz;        // CH2 频率
+    u8  ch2_duty_pct;       // CH2 占空比
+    u8  ch2_enabled;        // CH2 使能
+    u32 fg_freq_mhz;        // FG 频率 (毫赫兹, 精度 0.001Hz)
+    u8  fg_div;             // FG 分频系数
+    u16 rpm;                // 实时转速 (RPM)
+    u8  mode;               // 当前应用模式
+    u8  test_state;         // 测试状态 (0=空闲, 1=运行, 2=完成)
+    u16 test_cycle;         // 当前测试循环
+    u16 test_total;         // 总循环数
+    u16 vsp_voltage_x100;   // VSP 电压 ×100 (0~500 = 0.00~5.00V)
+    u8  vsp_enabled;        // VSP 使能
+    u8  test_on_method;     // 测试 ON 方式 (0=PWM, 1=继电器, 2=两者)
+} StatusData;  // 29 bytes
 
 /* ══════════════════════════════════════════════
  *  串口请求数据结构 (PC → MCU 命令载荷)
@@ -246,9 +246,9 @@ typedef struct {
 
 // CMD_WRITE_VSP (0x60): PC 写入 VSP 参数
 typedef struct {
-    u8  voltage_x10;        // VSP 电压 ×10 (0~50 = 0.0~5.0V)
+    u16 voltage_x100;       // VSP 电压 ×100 (0~500 = 0.00~5.00V)
     u8  enabled;            // VSP 使能 (0=关, 1=开)
-} VspWriteReq;
+} VspWriteReq;  // 3 bytes
 
 /* ══════════════════════════════════════════════
  *  协议命令字 (ProtocolCmd)

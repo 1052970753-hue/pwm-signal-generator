@@ -284,7 +284,7 @@ int main(void) {
                 PWM_UpdateFromParams(&g_params);
                 // 同步更新 VSP DAC 输出
                 if (g_params.vsp_enabled) {
-                    DAC_Output_SetVoltage(g_params.vsp_voltage_x10);
+                    DAC_Output_SetVoltage(g_params.vsp_voltage_x100);
                 } else {
                     DAC_Output_Off();
                 }
@@ -348,7 +348,7 @@ int main(void) {
             sd.test_state    = now_running ? TEST_RUNNING : TEST_IDLE;
             sd.test_cycle    = test_current_cycle;       // 已完成循环数
             sd.test_total    = Menu_GetTestCycles();     // 总循环数
-            sd.vsp_voltage_x10 = g_params.vsp_voltage_x10;  // VSP 电压
+            sd.vsp_voltage_x100 = g_params.vsp_voltage_x100;  // VSP 电压
             sd.vsp_enabled     = g_params.vsp_enabled;       // VSP 使能
             sd.test_on_method  = g_params.test_on_method;    // 测试 ON 方式
             Protocol_SendStatus(&sd);

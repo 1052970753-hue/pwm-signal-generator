@@ -290,10 +290,10 @@ static void render_ch_mode(SystemParams *p, u8 channel, u16 rpm, u8 blink) {
  *  │     VSP CTRL        │ 行0 (y=0):   标题
  *  │ O ON                │ 行1 (y=8):   ON/OFF 状态
  *  │                     │
- *  │    3.5V             │ 行3 (y=24):  大号电压显示
+ *  │    3.50V            │ 行3 (y=24):  大号电压显示 (2位小数)
  *  │ [=========         ]│ 行4 (y=32):  百分比进度条
  *  │---------------------│ 行5 (y=40):  分隔线
- *  │>Vout:3.5V   EN:ON   │ 行6 (y=48):  电压值 + 使能 (cursor=0,1)
+ *  │>Vout:3.50V  EN:ON   │ 行6 (y=48):  电压值 + 使能 (cursor=0,1)
  *  │                     │ 行7 (y=56):  (未使用)
  *  └─────────────────────┘
  */
@@ -301,7 +301,7 @@ static void render_vsp_mode(SystemParams *p, u8 blink) {
     u8 buf[12];
     u8 cur = g_menu.cursor;
     u8 sel = g_menu.selected;
-    u8 v = p->vsp_voltage_x10;  // 0~50
+    u16 v = p->vsp_voltage_x100;  // 0~500
 
     OLED_Clear();
 
@@ -311,17 +311,18 @@ static void render_vsp_mode(SystemParams *p, u8 blink) {
     // 行1 (y=8): ON/OFF 状态
     OLED_ShowString(0, 8, (const u8 *)(p->vsp_enabled ? "O ON " : "  OFF"), 8, 1);
 
-    // 行3 (y=24): 电压值 "X.XV"
-    buf[0] = '0' + (v / 10);    // 整数位
+    // 行3 (y=24): 电压值 "X.XXV" (2位小数)
+    buf[0] = '0' + (v / 100);          // 整数位
     buf[1] = '.';
-    buf[2] = '0' + (v % 10);    // 小数位
-    buf[3] = 'V';
-    buf[4] = 0;
-    OLED_ShowString(42, 24, buf, 8, 1);
+    buf[2] = '0' + ((v / 10) % 10);    // 十分位
+    buf[3] = '0' + (v % 10);           // 百分位
+    buf[4] = 'V';
+    buf[5] = 0;
+    OLED_ShowString(36, 24, buf, 8, 1);
 
-    // 行4 (y=32): 进度条 (v/50 * 100%)
+    // 行4 (y=32): 进度条 (v/500 * 100%)
     {
-        u8 bar_len = (u8)((u32)v * 20 / 50);  // 最多 20 个字符
+        u8 bar_len = (u8)((u32)v * 20 / 500);  // 最多 20 个字符
         u8 i;
         OLED_ShowString(4, 32, "[", 8, 1);
         for (i = 0; i < 20; i++) {
@@ -338,16 +339,17 @@ static void render_vsp_mode(SystemParams *p, u8 blink) {
     // 行6 (y=48): Vout 值 + EN 状态
     OLED_ShowString(0, 48, marker_str(cur, sel, VSP_ITEM_VOLTAGE, blink), 8, 1);
     OLED_ShowString(6, 48, "Vout:", 8, 1);
-    buf[0] = '0' + (v / 10);
+    buf[0] = '0' + (v / 100);
     buf[1] = '.';
-    buf[2] = '0' + (v % 10);
-    buf[3] = 'V';
-    buf[4] = 0;
+    buf[2] = '0' + ((v / 10) % 10);
+    buf[3] = '0' + (v % 10);
+    buf[4] = 'V';
+    buf[5] = 0;
     OLED_ShowString(36, 48, buf, 8, 1);
 
-    OLED_ShowString(72, 48, marker_str(cur, sel, VSP_ITEM_ENABLE, blink), 8, 1);
-    OLED_ShowString(78, 48, "EN:", 8, 1);
-    OLED_ShowString(96, 48, (const u8 *)(p->vsp_enabled ? "ON " : "OFF"), 8, 1);
+    OLED_ShowString(78, 48, marker_str(cur, sel, VSP_ITEM_ENABLE, blink), 8, 1);
+    OLED_ShowString(84, 48, "EN:", 8, 1);
+    OLED_ShowString(102, 48, (const u8 *)(p->vsp_enabled ? "ON " : "OFF"), 8, 1);
 
     OLED_Refresh();
 }

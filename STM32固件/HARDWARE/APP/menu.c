@@ -109,7 +109,7 @@ void Menu_Init(void) {
     g_params.ch2_enabled = 0;       // CH2 默认关闭
     g_params.fg_div = 2;            // FG 默认 2 分频
     g_params.fg_pulses_per_rev = 2; // 每转脉冲数 (备用)
-    g_params.vsp_voltage_x10 = 0;   // VSP 默认 0V
+    g_params.vsp_voltage_x100 = 0;  // VSP 默认 0V
     g_params.vsp_enabled = 0;       // VSP 默认关闭
     g_params.test_on_method = 0;    // 测试默认 PWM 开关
 }
@@ -678,14 +678,14 @@ void Menu_Process(InputEvent ev) {
             switch (ev) {
                 case EVENT_CW:
                     if (g_menu.cursor == VSP_ITEM_VOLTAGE) {
-                        if (g_params.vsp_voltage_x10 < 50)
-                            g_params.vsp_voltage_x10++;     // 电压 +0.1V
+                        if (g_params.vsp_voltage_x100 < 500)
+                            g_params.vsp_voltage_x100++;    // 电压 +0.01V
                     }
                     break;
                 case EVENT_CCW:
                     if (g_menu.cursor == VSP_ITEM_VOLTAGE) {
-                        if (g_params.vsp_voltage_x10 > 0)
-                            g_params.vsp_voltage_x10--;     // 电压 -0.1V
+                        if (g_params.vsp_voltage_x100 > 0)
+                            g_params.vsp_voltage_x100--;    // 电压 -0.01V
                     }
                     break;
                 case EVENT_CLICK:

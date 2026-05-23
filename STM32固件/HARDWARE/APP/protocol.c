@@ -317,7 +317,7 @@ static void handle_read_status(void) {
     sd.test_state    = Menu_IsTestRunning() ? 1 : 0;    // 测试运行状态
     sd.test_cycle    = 0;                                // 当前测试循环 (由 main.c 填入)
     sd.test_total    = Menu_GetTestCycles();             // 测试总循环数
-    sd.vsp_voltage_x10 = g_params.vsp_voltage_x10;      // VSP 电压 ×10
+    sd.vsp_voltage_x100 = g_params.vsp_voltage_x100;    // VSP 电压 ×100
     sd.vsp_enabled     = g_params.vsp_enabled;           // VSP 使能
     sd.test_on_method  = g_params.test_on_method;        // 测试 ON 方式
     send_frame(CMD_READ_STATUS, (const u8 *)&sd, sizeof(StatusData));
@@ -391,12 +391,12 @@ static void handle_write_vsp(void) {
     if (frame_len != sizeof(VspWriteReq)) return;
     VspWriteReq *req = (VspWriteReq *)frame_data;
 
-    if (req->voltage_x10 <= 50)
-        g_params.vsp_voltage_x10 = req->voltage_x10;
+    if (req->voltage_x100 <= 500)
+        g_params.vsp_voltage_x100 = req->voltage_x100;
     g_params.vsp_enabled = req->enabled ? 1 : 0;
 
     if (g_params.vsp_enabled) {
-        DAC_Output_SetVoltage(g_params.vsp_voltage_x10);
+        DAC_Output_SetVoltage(g_params.vsp_voltage_x100);
     } else {
         DAC_Output_Off();
     }

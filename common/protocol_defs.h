@@ -42,10 +42,10 @@ typedef struct {
     uint8_t  test_state;   // TestState (0=idle,1=running,2=done)
     uint16_t test_cycle;   // current cycle number
     uint16_t test_total;   // total cycles configured
-    uint8_t  vsp_voltage_x10;  // VSP voltage *10 (0~50 = 0.0~5.0V)
+    uint16_t vsp_voltage_x100;  // VSP voltage *100 (0~500 = 0.00~5.00V)
     uint8_t  vsp_enabled;      // VSP enable (0=off, 1=on)
     uint8_t  test_on_method;   // Test ON method (0=PWM, 1=relay, 2=both)
-} StatusData;  // 28 bytes
+} StatusData;  // 29 bytes
 
 typedef struct {
     uint8_t  channel;
@@ -73,7 +73,7 @@ typedef struct {
 } TestConfig;  // 13 bytes
 
 typedef struct {
-    uint8_t voltage_x10;    // VSP voltage *10 (0~50 = 0.0~5.0V)
+    uint16_t voltage_x100;   // VSP voltage *100 (0~500 = 0.00~5.00V)
     uint8_t enabled;        // VSP enable (0=off, 1=on)
 } VspWriteReq;
 
@@ -87,7 +87,7 @@ typedef struct {
     uint8_t  ch2_enabled;
     uint8_t  fg_div;
     uint16_t fg_pulses_per_rev;
-    uint8_t  vsp_voltage_x10;
+    uint16_t vsp_voltage_x100;
     uint8_t  vsp_enabled;
     uint8_t  test_on_method;
 } SystemParams;
